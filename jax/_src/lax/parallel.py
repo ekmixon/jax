@@ -424,14 +424,16 @@ def xeinsum(spec: str, x, y):
   # if a subscript appears in both inputs and not the outputs, contract!
   subs_contract = all_subs - set(out_subs)
 
-  lhs_reduce_axes = [lhs_subs.index(n) for n in lhs_uniques & subs_contract]
-  if lhs_reduce_axes:
+  if lhs_reduce_axes := [
+      lhs_subs.index(n) for n in lhs_uniques & subs_contract
+  ]:
     x = lax._reduce_sum(x, lhs_reduce_axes)
     for i in sorted(lhs_reduce_axes, reverse=True):
       del lhs_subs[i]
 
-  rhs_reduce_axes = [rhs_subs.index(n) for n in rhs_uniques & subs_contract]
-  if rhs_reduce_axes:
+  if rhs_reduce_axes := [
+      rhs_subs.index(n) for n in rhs_uniques & subs_contract
+  ]:
     y = lax._reduce_sum(y, rhs_reduce_axes)
     for i in sorted(rhs_reduce_axes, reverse=True):
       del rhs_subs[i]
@@ -467,12 +469,11 @@ class XeinsumSpecParser:
     return self.spec[self.pos]
 
   def parse_subscript(self):
-    if self.cur in string.ascii_lowercase:
-      out = self.cur
-      self.pos += 1
-      return out, True
-    else:
+    if self.cur not in string.ascii_lowercase:
       return None, False
+    out = self.cur
+    self.pos += 1
+    return out, True
 
   def parse_axis_name(self):
     try:
@@ -508,18 +509,17 @@ class XeinsumSpecParser:
       return False, (subscripts, names)
     if self.maybe_take(','):
       return True, (subscripts, names)
-    else:
-      assert self.maybe_take('{')
-      first = True
-      while not self.maybe_take('}'):
-        if not first:
-          assert self.maybe_take(',')
-        first = False
-        if self.eof:
-          raise ValueError("Unterminated named axis brace")
-        axis_name = self.parse_axis_name()
-        names.append(axis_name)
-      return self.maybe_take(',', False), (subscripts, names)
+    assert self.maybe_take('{')
+    first = True
+    while not self.maybe_take('}'):
+      if not first:
+        assert self.maybe_take(',')
+      first = False
+      if self.eof:
+        raise ValueError("Unterminated named axis brace")
+      axis_name = self.parse_axis_name()
+      names.append(axis_name)
+    return self.maybe_take(',', False), (subscripts, names)
 
   def parse_args(self):
     arg_specs = []
@@ -632,13 +632,12 @@ def _allreduce_abstract_eval(*args, axes, axis_index_groups):
   pos_axes = tuple(axis for axis in axes if isinstance(axis, int))
   named_shapes = [arg.named_shape for arg in args]
   if axis_index_groups is None:
-    named_axes = set(axis for axis in axes if not isinstance(axis, int))
+    named_axes = {axis for axis in axes if not isinstance(axis, int)}
     named_shapes = [{name: size for name, size in arg.named_shape.items()
                      if name not in named_axes} for arg in args]
-  else:
-    if len(pos_axes) != 0:
-      raise ValueError(f"axis_index_groups can only be used with reductions over "
-                       f"named axes, but got: {axes}")
+  elif pos_axes:
+    raise ValueError(f"axis_index_groups can only be used with reductions over "
+                     f"named axes, but got: {axes}")
   return [ShapedArray(lax._reduce_op_shape_rule(raise_to_shaped(arg), axes=pos_axes),
                       arg.dtype, named_shape=named_shape)
           for arg, named_shape in zip(args, named_shapes)]
@@ -707,23 +706,24 @@ core.axis_substitution_rules[psum_p] = partial(_subst_all_names_in_param, 'axes'
 # tracing time.
 @psum_p.def_custom_bind
 def psum_bind(*args, axes, axis_index_groups):
-  if all(not isinstance(x, core.Tracer) for x in args):
-    named_axes, pos_axes = axes_partition = [], []
-    for axis in axes:
-      axes_partition[isinstance(axis, int)].append(axis)
-    def pos_reduce(x):
-      if not pos_axes:
-        return x
-      return lax._reduce_sum(x, [canonicalize_axis(axis, getattr(x, 'ndim', 0))
-                                 for axis in pos_axes])
-    if axis_index_groups is not None:
-      assert not pos_axes
-      size = len(axis_index_groups[0])
-    else:
-      size = prod([core.axis_frame(name).size for name in named_axes])  # type: ignore
-    return tuple(lax._const(x, size) * pos_reduce(x) for x in args)
-  return core.AxisPrimitive.bind(
-      psum_p, *args, axes=axes, axis_index_groups=axis_index_groups)
+  if any(isinstance(x, core.Tracer) for x in args):
+    return core.AxisPrimitive.bind(
+        psum_p, *args, axes=axes, axis_index_groups=axis_index_groups)
+  named_axes, pos_axes = axes_partition = [], []
+  for axis in axes:
+    axes_partition[isinstance(axis, int)].append(axis)
+  def pos_reduce(x):
+    return (lax._reduce_sum(
+        x,
+        [canonicalize_axis(axis, getattr(x, 'ndim', 0)) for axis in pos_axes],
+    ) if pos_axes else x)
+
+  if axis_index_groups is not None:
+    assert not pos_axes
+    size = len(axis_index_groups[0])
+  else:
+    size = prod([core.axis_frame(name).size for name in named_axes])  # type: ignore
+  return tuple(lax._const(x, size) * pos_reduce(x) for x in args)
 
 
 pmax_p = core.AxisPrimitive('pmax')
@@ -756,7 +756,7 @@ def _ppermute_translation_rule(c, x, *, axis_name, axis_env, perm, platform):
   replica_groups = _replica_groups(axis_env, axis_name, None)
   group_size = len(replica_groups[0])
   srcs, dsts = unzip2((src % group_size, dst % group_size) for src, dst in perm)
-  if not (len(srcs) == len(set(srcs)) and len(dsts) == len(set(dsts))):
+  if len(srcs) != len(set(srcs)) or len(dsts) != len(set(dsts)):
     msg = "ppermute sources and destinations must be unique, got {}."
     raise ValueError(msg.format(perm))
 
@@ -844,7 +844,7 @@ def _all_to_all_translation_rule(c, x, *, split_axis, concat_axis, axis_name,
   elif (platform == "tpu") or ((platform == "gpu") and (split_axis == 0) and
                                (concat_axis == 0)):
     split_count = len(replica_groups[0])
-    if not all(split_count == len(g) for g in replica_groups):
+    if any(split_count != len(g) for g in replica_groups):
       raise ValueError('Replica groups must be equally sized')
     replica_groups_protos = xc.make_replica_groups(replica_groups)
     return xops.AllToAll(x, split_axis, concat_axis, split_count, replica_groups_protos)
@@ -1158,19 +1158,17 @@ def _axis_index_bind(*, axis_name):
     dynamic = core.thread_local_state.trace_state.trace_stack.dynamic
     if (frame.main_trace is None or dynamic.level > frame.main_trace.level):
       return core.Primitive.bind(axis_index_p, axis_name=name)
-    else:
-      trace = frame.main_trace.with_cur_sublevel()
-      return trace.process_axis_index(frame)
+    trace = frame.main_trace.with_cur_sublevel()
+    return trace.process_axis_index(frame)
 
   if not isinstance(axis_name, (tuple, list)):
     return name_idx(axis_name)
-  else:
-    inner_size = 1
-    index = 0
-    for name in reversed(axis_name):
-      index += name_idx(name) * inner_size
-      inner_size *= psum(1, name)
-    return index
+  inner_size = 1
+  index = 0
+  for name in reversed(axis_name):
+    index += name_idx(name) * inner_size
+    inner_size *= psum(1, name)
+  return index
 axis_index_p.def_custom_bind(_axis_index_bind)
 
 def _vmap_process_axis_index(self, frame):
@@ -1190,7 +1188,7 @@ def _pdot_impl(x, y, *, axis_name, pos_contract, pos_batch):
 @pdot_p.def_abstract_eval
 def _pdot_abstract_eval(x, y, *, axis_name, pos_contract, pos_batch):
   # TODO(frostig,mattjj,jekbradbury): check inputs have given axis names?
-  if not len(set(axis_name)) == len(axis_name): raise ValueError
+  if len(set(axis_name)) != len(axis_name): raise ValueError
   pos_aval = lax.dot_general_p.abstract_eval(
       x, y, dimension_numbers=[pos_contract, pos_batch],
       precision=None, preferred_element_type=None)

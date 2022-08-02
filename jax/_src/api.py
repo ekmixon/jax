@@ -649,10 +649,9 @@ def xla_computation(fun: Callable,
   def make_axis_env(nreps):
     if axis_env is None:
       return xla.AxisEnv(nreps, (), ())
-    else:
-      nreps = nreps * prod(size for name, size in axis_env)
-      names, sizes = unzip2(axis_env)
-      return xla.AxisEnv(nreps, names, sizes)
+    nreps = nreps * prod(size for name, size in axis_env)
+    names, sizes = unzip2(axis_env)
+    return xla.AxisEnv(nreps, names, sizes)
 
   @wraps(fun)
   @api_boundary
@@ -721,10 +720,7 @@ def xla_computation(fun: Callable,
                            "to get a ShapedArray, otherwise this "
                            "information is lost")
 
-    if return_shape:
-      return built, out_shape
-    else:
-      return built
+    return (built, out_shape) if return_shape else built
 
   return computation_maker
 
@@ -869,10 +865,7 @@ def value_and_grad(fun: Callable, argnums: Union[int, Sequence[int]] = 0,
     tree_map(partial(_check_output_dtype_grad, holomorphic), ans)
     g = vjp_py(np.ones((), dtype=dtype))
     g = g[0] if isinstance(argnums, int) else g
-    if not has_aux:
-      return ans, g
-    else:
-      return (ans, aux), g
+    return ((ans, aux), g) if has_aux else (ans, g)
 
   return value_and_grad_f
 
@@ -883,11 +876,10 @@ def _check_scalar(x):
   except TypeError as e:
     raise TypeError(msg(f"was {x}")) from e
   else:
-    if isinstance(aval, ShapedArray):
-      if aval.shape != ():
-        raise TypeError(msg(f"had shape: {aval.shape}"))
-    else:
+    if not isinstance(aval, ShapedArray):
       raise TypeError(msg(f"had abstract value {aval}"))
+    if aval.shape != ():
+      raise TypeError(msg(f"had shape: {aval.shape}"))
 
 def _check_input_dtype_revderiv(name, holomorphic, allow_int, x):
   _check_arg(x)
@@ -896,8 +888,8 @@ def _check_input_dtype_revderiv(name, holomorphic, allow_int, x):
     if not dtypes.issubdtype(aval.dtype, np.complexfloating):
       raise TypeError(f"{name} with holomorphic=True requires inputs with complex dtype, "
                       f"but got {aval.dtype.name}.")
-  elif not allow_int and not (dtypes.issubdtype(aval.dtype, np.floating) or
-                              dtypes.issubdtype(aval.dtype, np.complexfloating)):
+  elif (not allow_int and not dtypes.issubdtype(aval.dtype, np.floating)
+        and not dtypes.issubdtype(aval.dtype, np.complexfloating)):
     raise TypeError(f"{name} requires real- or complex-valued inputs (input dtype that "
                     "is a sub-dtype of np.floating or np.complexfloating), "
                     f"but got {aval.dtype.name}. If you want to use integer-valued "
@@ -966,8 +958,9 @@ def _check_input_dtype_jacfwd(holomorphic, x):
   _check_arg(x)
   aval = core.get_aval(x)
   if holomorphic:
-    if not (dtypes.issubdtype(aval.dtype, np.complexfloating) and
-            not dtypes.issubdtype(aval.dtype, np.floating)):
+    if not dtypes.issubdtype(aval.dtype,
+                             np.complexfloating) or dtypes.issubdtype(
+                                 aval.dtype, np.floating):
       raise TypeError("jacfwd with holomorphic=True requires inputs with complex dtype, "
                       f"but got {aval.dtype.name}.")
   elif not dtypes.issubdtype(aval.dtype, np.floating):
@@ -979,10 +972,9 @@ def _check_input_dtype_jacfwd(holomorphic, x):
 
 def _check_output_dtype_jacfwd(holomorphic, x):
   aval = core.get_aval(x)
-  if holomorphic:
-    if not dtypes.issubdtype(aval.dtype, np.complexfloating):
-      raise TypeError("jacfwd with holomorphic=True requires outputs with complex dtype, "
-                      f"but got {aval.dtype.name}.")
+  if holomorphic and not dtypes.issubdtype(aval.dtype, np.complexfloating):
+    raise TypeError("jacfwd with holomorphic=True requires outputs with complex dtype, "
+                    f"but got {aval.dtype.name}.")
 
 
 def jacrev(fun: Callable, argnums: Union[int, Sequence[int]] = 0,
@@ -1258,10 +1250,10 @@ def vmap(fun: F, in_axes=0, out_axes=0, axis_name=None) -> F:
     # rather than raising an error. https://github.com/google/jax/issues/2367
     in_axes = tuple(in_axes)
 
-  if not all(type(l) is int for l in tree_leaves(in_axes)):
+  if any(type(l) is not int for l in tree_leaves(in_axes)):
     raise TypeError("vmap in_axes must be an int, None, or (nested) container "
                     f"with those types as leaves, but got {in_axes}.")
-  if not all(type(l) is int for l in tree_leaves(out_axes)):
+  if any(type(l) is not int for l in tree_leaves(out_axes)):
     raise TypeError("vmap out_axes must be an int, None, or (nested) container "
                     f"with those types as leaves, but got {out_axes}.")
 
@@ -1560,10 +1552,10 @@ def pmap(
   donate_tuple = rebase_donate_argnums(_ensure_index_tuple(donate_argnums),
                                        static_broadcasted_tuple)
 
-  if not all(type(l) is int for l in tree_leaves(in_axes)):
+  if any(type(l) is not int for l in tree_leaves(in_axes)):
     raise TypeError("pmap in_axes must be an int, None, or (nested) container "
                     f"with those types as leaves, but got {in_axes}.")
-  if not all(type(l) is int for l in tree_leaves(out_axes)):
+  if any(type(l) is not int for l in tree_leaves(out_axes)):
     raise TypeError("pmap out_axes must be an int, None, or (nested) container "
                     f"with those types as leaves, but got {out_axes}.")
 
@@ -1979,10 +1971,9 @@ def _vjp(fun: lu.WrappedFun, *primals, has_aux=False, reduce_axes=()):
                            ct_dtypes, ct_shapes,
                            (out_tree, in_tree)),
                    out_vjp)
-  if not has_aux:
-    return out_primal_py, vjp_py
-  else:
-    return out_primal_py, vjp_py, tree_unflatten(aux_tree, aux)
+  return ((out_primal_py, vjp_py,
+           tree_unflatten(aux_tree, aux)) if has_aux else (out_primal_py,
+                                                           vjp_py))
 
 
 def linear_transpose(fun: Callable, *primals, reduce_axes=()) -> Callable:
@@ -2227,13 +2218,13 @@ def device_put_sharded(shards: Sequence[Any], devices: Sequence[xc.Device]):
   if not isinstance(shards, Sequence):
     raise ValueError("device_put_sharded `shards` input must be a sequence; "
                      f"got {type(shards)}")
-  if not len(shards) == len(devices):
+  if len(shards) != len(devices):
     raise ValueError(f"len(shards) = {len(shards)} must equal "
                      f"len(devices) = {len(devices)}.")
 
   def _device_put_sharded(*xs) -> pxla.ShardedDeviceArray:
     avals = [core.raise_to_shaped(core.get_aval(x)) for x in xs]
-    if not all(a1 == a2 for a1, a2 in zip(avals[:-1], avals[1:])):
+    if any(a1 != a2 for a1, a2 in zip(avals[:-1], avals[1:])):
       a1, a2 = next((a1, a2) for a1, a2 in zip(avals[:-1], avals[1:])
                     if a1 != a2)
       raise ValueError("the shards passed to device_put_sharded must have "
@@ -2344,11 +2335,9 @@ class ShapeDtypeStruct:
   __str__ = __repr__
 
   def __eq__(self, other):
-    if not isinstance(other, ShapeDtypeStruct):
-      return False
-    else:
-      return (other.shape, other.dtype, other.named_shape) == (
-          self.shape, self.dtype, self.named_shape)
+    return ((other.shape, other.dtype,
+             other.named_shape) == (self.shape, self.dtype, self.named_shape)
+            if isinstance(other, ShapeDtypeStruct) else False)
 
   def __hash__(self):
     return hash((self.shape, self.dtype, self.named_shape))

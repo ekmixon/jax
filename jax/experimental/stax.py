@@ -124,6 +124,7 @@ def BatchNorm(axis=(0, 1, 2), epsilon=1e-5, center=True, scale=True,
     k1, k2 = random.split(rng)
     beta, gamma = _beta_init(k1, shape), _gamma_init(k2, shape)
     return input_shape, (beta, gamma)
+
   def apply_fun(params, x, **kwargs):
     beta, gamma = params
     # TODO(phawkins): jnp.expand_dims should accept an axis tuple.
@@ -132,8 +133,8 @@ def BatchNorm(axis=(0, 1, 2), epsilon=1e-5, center=True, scale=True,
     z = normalize(x, axis, epsilon=epsilon)
     if center and scale: return gamma[ed] * z + beta[ed]
     if center: return z + beta[ed]
-    if scale: return gamma[ed] * z
-    return z
+    return gamma[ed] * z if scale else z
+
   return init_fun, apply_fun
 
 
@@ -257,8 +258,9 @@ def Dropout(rate, mode='train'):
   """Layer construction function for a dropout layer with given rate."""
   def init_fun(rng, input_shape):
     return input_shape, ()
+
   def apply_fun(params, inputs, **kwargs):
-    rng = kwargs.get('rng', None)
+    rng = kwargs.get('rng')
     if rng is None:
       msg = ("Dropout layer requires apply_fun to be called with a PRNG key "
              "argument. That is, instead of `apply_fun(params, inputs)`, call "
@@ -270,6 +272,7 @@ def Dropout(rate, mode='train'):
       return jnp.where(keep, inputs / rate, 0)
     else:
       return inputs
+
   return init_fun, apply_fun
 
 

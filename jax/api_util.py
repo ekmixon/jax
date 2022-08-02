@@ -53,10 +53,7 @@ def _ensure_str(x: str) -> str:
 
 def _ensure_str_tuple(x: Union[str, Iterable[str]]) -> Tuple[str, ...]:
   """Convert x to a tuple of strings."""
-  if isinstance(x, str):
-    return (x,)
-  else:
-    return tuple(map(_ensure_str, x))
+  return (x, ) if isinstance(x, str) else tuple(map(_ensure_str, x))
 
 @lu.transformation_with_aux
 def flatten_fun(in_tree, *args_flat):
@@ -68,7 +65,7 @@ def apply_flat_fun(fun, io_tree, *py_args):
   in_tree_expected, out_tree = io_tree
   args, in_tree = tree_flatten((py_args, {}))
   if in_tree != in_tree_expected:
-    raise TypeError("Expected {}, got {}".format(in_tree_expected, in_tree))
+    raise TypeError(f"Expected {in_tree_expected}, got {in_tree}")
   ans = fun(*args)
   return tree_unflatten(out_tree, ans)
 
@@ -82,7 +79,7 @@ def apply_flat_fun_nokwargs(fun, io_tree, py_args):
   in_tree_expected, out_tree = io_tree
   args, in_tree = tree_flatten(py_args)
   if in_tree != in_tree_expected:
-    raise TypeError("Expected {}, got {}".format(in_tree_expected, in_tree))
+    raise TypeError(f"Expected {in_tree_expected}, got {in_tree}")
   ans = fun(*args)
   return tree_unflatten(out_tree, ans)
 
@@ -160,8 +157,7 @@ def _argnums_partial(dyn_argnums, fixed_args, *dyn_args, **kwargs):
   args = [None if arg is unit else arg.val for arg in fixed_args]
   for i, arg in zip(dyn_argnums, dyn_args):
     args[i] = arg
-  ans = yield args, kwargs
-  yield ans
+  yield (yield args, kwargs)
 
 
 def argnames_partial(f, dyn_argnames, kwargs):
@@ -198,18 +194,18 @@ def argnames_partial_except(f: lu.WrappedFun, static_argnames: Tuple[str, ...],
 
 @lu.transformation
 def _argnames_partial(fixed_kwargs: WrapKwArgs, *args, **dyn_kwargs):
-  kwargs = {k: None if arg is unit else arg.val
-            for k, arg in fixed_kwargs.val.items()}
-  kwargs.update(dyn_kwargs)
-  ans = yield args, kwargs
-  yield ans
+  kwargs = {
+      k: None if arg is unit else arg.val
+      for k, arg in fixed_kwargs.val.items()
+  } | dyn_kwargs
+  yield (yield args, kwargs)
 
 
 def donation_vector(donate_argnums, args, kwargs) -> Tuple[bool, ...]:
   """Returns a tuple with a boolean value for each leaf in args."""
   res = []
   for i, arg in enumerate(args):
-    donate = bool(i in donate_argnums)
+    donate = i in donate_argnums
     res.extend((donate,) * tree_structure(arg).num_leaves)
   res.extend((False,) * tree_structure(kwargs).num_leaves)
   return tuple(res)

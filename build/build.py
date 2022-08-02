@@ -83,7 +83,7 @@ def check_numpy_version(python_bin_path):
     [python_bin_path, "-c", "import numpy as np; print(np.__version__)"])
   numpy_version = tuple(map(int, version.split('.')[:2]))
   if numpy_version < (1, 17):
-    print("ERROR: JAX requires NumPy 1.17 or newer, found " + version + ".")
+    print(f"ERROR: JAX requires NumPy 1.17 or newer, found {version}.")
     sys.exit(-1)
   return version
 
@@ -92,7 +92,7 @@ def check_scipy_version(python_bin_path):
     [python_bin_path, "-c", "import scipy as sp; print(sp.__version__)"])
   scipy_version = tuple(map(int, version.split('.')[:2]))
   if scipy_version < (1, 0):
-    print("ERROR: JAX requires SciPy 1.0 or newer, found " + version + ".")
+    print(f"ERROR: JAX requires SciPy 1.0 or newer, found {version}.")
     sys.exit(-1)
   return version
 
@@ -215,7 +215,7 @@ def check_bazel_version(bazel_path):
   match = re.search("Build label: *([0-9\\.]+)[^0-9\\.]", version_output)
   if match is None:
     return False
-  actual_ints = [int(x) for x in match.group(1).split(".")]
+  actual_ints = [int(x) for x in match[1].split(".")]
   return actual_ints >= [2, 0, 0]
 
 
@@ -372,20 +372,21 @@ def _parse_string_as_bool(s):
   elif lower == "false":
     return False
   else:
-    raise ValueError("Expected either 'true' or 'false'; got {}".format(s))
+    raise ValueError(f"Expected either 'true' or 'false'; got {s}")
 
 
 def add_boolean_argument(parser, name, default=False, help_str=None):
   """Creates a boolean flag."""
   group = parser.add_mutually_exclusive_group()
   group.add_argument(
-      "--" + name,
+      f"--{name}",
       nargs="?",
       default=default,
       const=True,
       type=_parse_string_as_bool,
-      help=help_str)
-  group.add_argument("--no" + name, dest=name, action="store_false")
+      help=help_str,
+  )
+  group.add_argument(f"--no{name}", dest=name, action="store_false")
 
 
 def main():
@@ -507,46 +508,45 @@ def main():
 
   # Find a working Bazel.
   bazel_path = get_bazel_path(args.bazel_path, wheel_cpu)
-  print("Bazel binary path: {}".format(bazel_path))
+  print(f"Bazel binary path: {bazel_path}")
 
   python_bin_path = get_python_bin_path(args.python_bin_path)
-  print("Python binary path: {}".format(python_bin_path))
+  print(f"Python binary path: {python_bin_path}")
   python_version = get_python_version(python_bin_path)
-  print("Python version: {}".format(".".join(map(str, python_version))))
+  print(f'Python version: {".".join(map(str, python_version))}')
   check_python_version(python_version)
 
   numpy_version = check_numpy_version(python_bin_path)
-  print("NumPy version: {}".format(numpy_version))
+  print(f"NumPy version: {numpy_version}")
   scipy_version = check_scipy_version(python_bin_path)
-  print("SciPy version: {}".format(scipy_version))
+  print(f"SciPy version: {scipy_version}")
 
-  print("MKL-DNN enabled: {}".format("yes" if args.enable_mkl_dnn else "no"))
-  print("Target CPU: {}".format(wheel_cpu))
-  print("Target CPU features: {}".format(args.target_cpu_features))
+  print(f'MKL-DNN enabled: {"yes" if args.enable_mkl_dnn else "no"}')
+  print(f"Target CPU: {wheel_cpu}")
+  print(f"Target CPU features: {args.target_cpu_features}")
 
   cuda_toolkit_path = args.cuda_path
   cudnn_install_path = args.cudnn_path
   rocm_toolkit_path = args.rocm_path
-  print("CUDA enabled: {}".format("yes" if args.enable_cuda else "no"))
+  print(f'CUDA enabled: {"yes" if args.enable_cuda else "no"}')
   if args.enable_cuda:
     if cuda_toolkit_path:
-      print("CUDA toolkit path: {}".format(cuda_toolkit_path))
+      print(f"CUDA toolkit path: {cuda_toolkit_path}")
     if cudnn_install_path:
-      print("CUDNN library path: {}".format(cudnn_install_path))
-    print("CUDA compute capabilities: {}".format(args.cuda_compute_capabilities))
+      print(f"CUDNN library path: {cudnn_install_path}")
+    print(f"CUDA compute capabilities: {args.cuda_compute_capabilities}")
     if args.cuda_version:
-      print("CUDA version: {}".format(args.cuda_version))
+      print(f"CUDA version: {args.cuda_version}")
     if args.cudnn_version:
-      print("CUDNN version: {}".format(args.cudnn_version))
-    print("NCCL enabled: {}".format("yes" if args.enable_nccl else "no"))
+      print(f"CUDNN version: {args.cudnn_version}")
+    print(f'NCCL enabled: {"yes" if args.enable_nccl else "no"}')
 
-  print("TPU enabled: {}".format("yes" if args.enable_tpu else "no"))
+  print(f'TPU enabled: {"yes" if args.enable_tpu else "no"}')
 
-  print("ROCm enabled: {}".format("yes" if args.enable_rocm else "no"))
-  if args.enable_rocm:
-    if rocm_toolkit_path:
-      print("ROCm toolkit path: {}".format(rocm_toolkit_path))
-      print("ROCm amdgpu targets: {}".format(args.rocm_amdgpu_targets))
+  print(f'ROCm enabled: {"yes" if args.enable_rocm else "no"}')
+  if args.enable_rocm and rocm_toolkit_path:
+    print(f"ROCm toolkit path: {rocm_toolkit_path}")
+    print(f"ROCm amdgpu targets: {args.rocm_amdgpu_targets}")
 
   write_bazelrc(
       python_bin_path=python_bin_path,

@@ -473,7 +473,7 @@ def skip_on_flag(flag_name, skip_value):
 def format_test_name_suffix(opname, shapes, dtypes):
   arg_descriptions = (format_shape_dtype_string(shape, dtype)
                       for shape, dtype in zip(shapes, dtypes))
-  return '{}_{}'.format(opname.capitalize(), '_'.join(arg_descriptions))
+  return f"{opname.capitalize()}_{'_'.join(arg_descriptions)}"
 
 
 # We use special symbols, represented as singleton objects, to distinguish
@@ -532,12 +532,12 @@ def _format_shape_dtype_string(shape, dtype):
   if shape is NUMPY_SCALAR_SHAPE:
     return dtype_str(dtype)
   elif shape is PYTHON_SCALAR_SHAPE:
-    return 'py' + dtype_str(dtype)
+    return f'py{dtype_str(dtype)}'
   elif type(shape) is tuple:
     shapestr = ','.join(str(dim) for dim in shape)
-    return '{}[{}]'.format(dtype_str(dtype), shapestr)
+    return f'{dtype_str(dtype)}[{shapestr}]'
   elif type(shape) is int:
-    return '{}[{},]'.format(dtype_str(dtype), shape)
+    return f'{dtype_str(dtype)}[{shape},]'
   else:
     raise TypeError(type(shape))
 
@@ -559,10 +559,8 @@ def _rand_dtype(rand, shape, dtype, scale=1., post=lambda x: x):
     to rand but scaled, converted to the appropriate dtype, and post-processed.
   """
   r = lambda: np.asarray(scale * rand(*_dims_of_shape(shape)), dtype)
-  if _dtypes.issubdtype(dtype, np.complexfloating):
-    vals = r() + 1.0j * r()
-  else:
-    vals = r()
+  vals = (r() + 1.0j * r()
+          if _dtypes.issubdtype(dtype, np.complexfloating) else r())
   return _cast_to_shape(np.asarray(post(vals), dtype), shape, dtype)
 
 
@@ -765,20 +763,19 @@ def check_raises(thunk, err_type, msg):
     thunk()
     assert False
   except err_type as e:
-    assert str(e).startswith(msg), "\n{}\n\n{}\n".format(e, msg)
+    assert str(e).startswith(msg), f"\n{e}\n\n{msg}\n"
 
 def check_raises_regexp(thunk, err_type, pattern):
   try:
     thunk()
     assert False
   except err_type as e:
-    assert re.match(pattern, str(e)), "{}\n\n{}\n".format(e, pattern)
+    assert re.match(pattern, str(e)), f"{e}\n\n{pattern}\n"
 
 
 def iter_eqns(jaxpr):
   # TODO(necula): why doesn't this search in params?
-  for eqn in jaxpr.eqns:
-    yield eqn
+  yield from jaxpr.eqns
   for subjaxpr in core.subjaxprs(jaxpr):
     yield from iter_eqns(subjaxpr)
 
@@ -787,7 +784,7 @@ def assert_dot_precision(expected_precision, fun, *args):
   precisions = [eqn.params['precision'] for eqn in iter_eqns(jaxpr.jaxpr)
                 if eqn.primitive == lax.dot_general_p]
   for precision in precisions:
-    msg = "Unexpected precision: {} != {}".format(expected_precision, precision)
+    msg = f"Unexpected precision: {expected_precision} != {precision}"
     if isinstance(precision, tuple):
       assert precision[0] == expected_precision, msg
       assert precision[1] == expected_precision, msg
@@ -814,7 +811,7 @@ def cases_from_gens(*gens):
   cases_per_size = int(FLAGS.num_generated_cases / len(sizes)) + 1
   for size in sizes:
     for i in range(cases_per_size):
-      yield ('_{}_{}'.format(size, i),) + tuple(gen(size) for gen in gens)
+      yield (f'_{size}_{i}', ) + tuple(gen(size) for gen in gens)
 
 def named_cases_from_sampler(gen):
   seen = set()
@@ -951,8 +948,8 @@ class JaxTestCase(parameterized.TestCase):
     ignore_space_re = re.compile(r'\s*\n\s*')
     expected_clean = re.sub(ignore_space_re, '\n', expected.strip())
     what_clean = re.sub(ignore_space_re, '\n', what.strip())
-    self.assertMultiLineEqual(expected_clean, what_clean,
-                              msg="Found\n{}\nExpecting\n{}".format(what, expected))
+    self.assertMultiLineEqual(
+        expected_clean, what_clean, msg=f"Found\n{what}\nExpecting\n{expected}")
 
   def _CompileAndCheck(self, fun, args_maker, *, check_dtypes=True,
                        rtol=None, atol=None, check_cache_misses=True):

@@ -72,7 +72,7 @@ zip = util.safe_zip
 def _sanitize_scope_name(name):
   scope_name = _INVALID_SCOPE_CHAR.sub("_", name)
   if not _VALID_SCOPE_REGEX.match(scope_name):
-    scope_name = ".{}".format(scope_name)
+    scope_name = f".{scope_name}"
   return scope_name
 
 
@@ -265,6 +265,7 @@ def convert(fun: Callable,
     # Name input tensors; do this after we have cast the arguments
     def _apply_name(a: TfVal, suffix) -> TfVal:
       return tf.identity(a, f"jax2tf_arg_{suffix}")
+
     args_flat = tuple(_apply_name(a, i) for i, a in enumerate(args_flat))
 
     if polymorphic_shapes is None:
@@ -299,8 +300,8 @@ def convert(fun: Callable,
 
     # Prepare the grad_fn for tf.custom_gradient.
     def converted_grad_fn(*out_cts_flat: TfVal,
-                          _out_cts_avals: Sequence[core.AbstractValue],
-                          variables=None):
+                              _out_cts_avals: Sequence[core.AbstractValue],
+                              variables=None):
       # If the function has outputs of integer or bool types, and if we are
       # under a tf.function context, then TF will pass None in _out_cts_flat
       # in place of these values. We should change these to some integers or
@@ -357,9 +358,8 @@ def convert(fun: Callable,
         _, arg_jax_dtype = _tfval_to_tensor_jax_dtype(arg)  # Maybe it is a scalar
         if np.issubdtype(arg_jax_dtype, np.inexact):
           return in_ct
-        else:
-          assert in_ct.dtype.as_numpy_dtype == tf.bfloat16
-          return tf.zeros(arg.shape, arg.dtype)
+        assert in_ct.dtype.as_numpy_dtype == tf.bfloat16
+        return tf.zeros(arg.shape, arg.dtype)
 
       in_cts_fixed = tf.nest.map_structure(fix_float0, args, in_cts)
       return in_cts_fixed
@@ -431,11 +431,9 @@ def dtype_of_val(val: TfVal) -> DType:
 def _extended_name_stack(extra_name_stack: Optional[str]):
   prev_name_stack = _thread_local_state.name_stack
   if extra_name_stack:
-    if not prev_name_stack:
-      _thread_local_state.name_stack = extra_name_stack
-    else:
-      _thread_local_state.name_stack = util.extend_name_stack(
-          _thread_local_state.name_stack, extra_name_stack)
+    _thread_local_state.name_stack = (util.extend_name_stack(
+        _thread_local_state.name_stack, extra_name_stack)
+                                      if prev_name_stack else extra_name_stack)
   try:
     yield
   finally:
@@ -826,10 +824,9 @@ class TensorFlowTrace(core.Trace):
     if val is core.unit:
       return TensorFlowTracer(self, tf.constant(np.nan, tf.float32),
                               core.abstract_unit)
-    else:
-      tf_val, jax_dtype = _tfval_to_tensor_jax_dtype(val)
-      return TensorFlowTracer(self, val,
-                              core.ShapedArray(tf_val.shape, jax_dtype))
+    tf_val, jax_dtype = _tfval_to_tensor_jax_dtype(val)
+    return TensorFlowTracer(self, val,
+                            core.ShapedArray(tf_val.shape, jax_dtype))
 
   def lift(self, val: core.Tracer) -> TensorFlowTracer:
     # This would be called when we need to raise a tracer from a lower-level
@@ -1026,13 +1023,12 @@ tf_impl[ad_util.add_jaxvals_p] = _add
 tf_impl[xla.device_put_p] = lambda x, device=None: x
 
 def _neg(x: TfVal) -> TfVal:
-  if x.dtype.is_unsigned:
-    signed_dtype = _UNSIGNED_TO_SIGNED_TABLE[x.dtype]
-    x_signed = tf.cast(x, signed_dtype)
-    res_signed = tf.math.negative(x_signed)
-    return tf.cast(res_signed, x.dtype)
-  else:
+  if not x.dtype.is_unsigned:
     return tf.math.negative(x)
+  signed_dtype = _UNSIGNED_TO_SIGNED_TABLE[x.dtype]
+  x_signed = tf.cast(x, signed_dtype)
+  res_signed = tf.math.negative(x_signed)
+  return tf.cast(res_signed, x.dtype)
 
 tf_impl[lax.neg_p] = _neg
 
@@ -1085,7 +1081,7 @@ tf_impl[lax.is_finite_p] = tf.math.is_finite
 
 def _abs(x: TfVal) -> TfVal:
   # TF and XLA do not support tf.math.abs for unsigned types.
-  return tf.math.abs(x) if not x.dtype.is_unsigned else x
+  return x if x.dtype.is_unsigned else tf.math.abs(x)
 
 
 tf_impl[lax.abs_p] = _abs
@@ -1199,14 +1195,13 @@ tf_impl[lax.iota_p] = _iota
 
 
 def _div(lhs, rhs):
-  if lhs.dtype.is_integer:
-    quotient = tf.math.floordiv(lhs, rhs)
-    select = tf.math.logical_and(
-        tf.not_equal(_sign(lhs), _sign(rhs)),
-        tf.not_equal(tf.math.floormod(lhs, rhs), 0))
-    return tf.where(select, quotient + 1, quotient)
-  else:
+  if not lhs.dtype.is_integer:
     return tf.math.truediv(lhs, rhs)
+  quotient = tf.math.floordiv(lhs, rhs)
+  select = tf.math.logical_and(
+      tf.not_equal(_sign(lhs), _sign(rhs)),
+      tf.not_equal(tf.math.floormod(lhs, rhs), 0))
+  return tf.where(select, quotient + 1, quotient)
 
 
 def _rem(lhs, rhs):
@@ -1258,16 +1253,15 @@ _UNSIGNED_TO_SIGNED_TABLE = {u: s for s, u in _SIGNED_TO_UNSIGNED_TABLE.items()}
 # Note: Bitwise operations only yield identical results on unsigned integers!
 # pylint: disable=protected-access
 def _shift_right_arithmetic_raw(x, y):
-  if x.dtype.is_unsigned:
-    assert x.dtype == y.dtype
-    orig_dtype = x.dtype
-    signed_dtype = _UNSIGNED_TO_SIGNED_TABLE[orig_dtype]
-    x = tf.cast(x, signed_dtype)
-    y = tf.cast(y, signed_dtype)
-    res = tf.bitwise.right_shift(x, y)
-    return tf.cast(res, orig_dtype)
-  else:
+  if not x.dtype.is_unsigned:
     return tf.bitwise.right_shift(x, y)
+  assert x.dtype == y.dtype
+  orig_dtype = x.dtype
+  signed_dtype = _UNSIGNED_TO_SIGNED_TABLE[orig_dtype]
+  x = tf.cast(x, signed_dtype)
+  y = tf.cast(y, signed_dtype)
+  res = tf.bitwise.right_shift(x, y)
+  return tf.cast(res, orig_dtype)
 
 
 def _shift_right_arithmetic(x, y):
@@ -1286,14 +1280,13 @@ tf_impl[lax.shift_right_arithmetic_p] = _shift_right_arithmetic
 def _shift_right_logical_raw(x, y):
   if x.dtype.is_unsigned:
     return tf.bitwise.right_shift(x, y)
-  else:
-    assert x.dtype == y.dtype
-    orig_dtype = x.dtype
-    unsigned_dtype = _SIGNED_TO_UNSIGNED_TABLE[orig_dtype]
-    x = tf.cast(x, unsigned_dtype)
-    y = tf.cast(y, unsigned_dtype)
-    res = tf.bitwise.right_shift(x, y)
-    return tf.cast(res, orig_dtype)
+  assert x.dtype == y.dtype
+  orig_dtype = x.dtype
+  unsigned_dtype = _SIGNED_TO_UNSIGNED_TABLE[orig_dtype]
+  x = tf.cast(x, unsigned_dtype)
+  y = tf.cast(y, unsigned_dtype)
+  res = tf.bitwise.right_shift(x, y)
+  return tf.cast(res, orig_dtype)
 
 
 def _shift_right_logical(x, y):
@@ -1344,10 +1337,7 @@ def _not(x):
     jnp.bitwise_not(jnp.array([True, False]).astype(np.int32)).astype(bool)
     >> DeviceArray([True,  True], dtype=bool)
   """
-  if x.dtype == tf.bool:
-    return tf.logical_not(x)
-  else:
-    return tf.bitwise.invert(x)
+  return tf.logical_not(x) if x.dtype == tf.bool else tf.bitwise.invert(x)
 
 
 tf_impl[lax.not_p] = _not
@@ -1375,26 +1365,25 @@ def bool_to_int8(f, argnums: Sequence[int]):
     argnum_types = {args[i].dtype for i in argnums}
     if tf.bool not in argnum_types:
       return f(*args, **kwargs)
-    else:
-      # All argnums should be boolean
-      assert len(argnum_types) == 1, argnum_types
-      args_cast = [(tf.cast(a, tf.int8) if i in argnums else a)
-                   for i, a in enumerate(args)]
-      if "_in_avals" in kwargs:
+    # All argnums should be boolean
+    assert len(argnum_types) == 1, argnum_types
+    args_cast = [(tf.cast(a, tf.int8) if i in argnums else a)
+                 for i, a in enumerate(args)]
+    if "_in_avals" in kwargs:
 
-        def cast_aval(aval):
-          assert aval.dtype == np.bool_
-          return core.ShapedArray(aval.shape, np.int8)
+      def cast_aval(aval):
+        assert aval.dtype == np.bool_
+        return core.ShapedArray(aval.shape, np.int8)
 
-        _in_avals_cast = [
-            cast_aval(aval) if i in argnums else aval
-            for i, aval in enumerate(kwargs["_in_avals"])
-        ]
-        _out_aval_cast = tf.nest.map_structure(cast_aval, kwargs["_out_aval"])
-        kwargs = dict(
-            kwargs, _in_avals=_in_avals_cast, _out_aval=_out_aval_cast)
-      out = f(*args_cast, **kwargs)
-      return tf.nest.map_structure(lambda o: tf.cast(o, tf.bool), out)
+      _in_avals_cast = [
+          cast_aval(aval) if i in argnums else aval
+          for i, aval in enumerate(kwargs["_in_avals"])
+      ]
+      _out_aval_cast = tf.nest.map_structure(cast_aval, kwargs["_out_aval"])
+      kwargs = dict(
+          kwargs, _in_avals=_in_avals_cast, _out_aval=_out_aval_cast)
+    out = f(*args_cast, **kwargs)
+    return tf.nest.map_structure(lambda o: tf.cast(o, tf.bool), out)
 
   return wrapper
 
@@ -1419,9 +1408,10 @@ def _convert_element_type(operand, *, new_dtype, weak_type=False):
   if (dtypes.issubdtype(old_dtype, np.complexfloating) and
       not dtypes.issubdtype(new_dtype, np.complexfloating)):
     operand = tf.math.real(operand)
-  if (dtypes.issubdtype(old_dtype, np.floating) and
-      not (dtypes.issubdtype(new_dtype, np.floating) or dtypes.issubdtype(
-          new_dtype, np.complexfloating) or new_dtype == np.bool_)):
+  if (dtypes.issubdtype(old_dtype, np.floating)
+      and not dtypes.issubdtype(new_dtype, np.floating)
+      and not dtypes.issubdtype(new_dtype, np.complexfloating)
+      and new_dtype != np.bool_):
     sign = _sign(operand)
     operand = sign * tf.math.floor(sign * operand)
   return tf.dtypes.cast(operand, _to_tf_dtype(new_dtype))
@@ -1567,16 +1557,15 @@ def _try_tf_conv(lhs, rhs, window_strides, padding, lhs_dilation, rhs_dilation,
     if list(lhs_spec) == ([0, len(lhs_spec) - 1] +
                           list(range(1,
                                      len(lhs_spec) - 1))):
-      return "N" + spatial_dim_alphabet + "C"
+      return f"N{spatial_dim_alphabet}C"
     raise error("Data format is unsupported by TensorFlow.")
 
   def convert_dilation_and_compute_result(tf_padding: str,
-                                          tf_dim_nums: str) -> TfVal:
+                                            tf_dim_nums: str) -> TfVal:
     no_dilation = [1] * nb_spatial_dimensions
     # TODO(bchetioui): is there a generic way to do a transposed atrous
     # convolution in TensorFlow?
-    if not (list(lhs_dilation) == no_dilation or
-            list(rhs_dilation) == no_dilation):
+    if list(lhs_dilation) != no_dilation and list(rhs_dilation) != no_dilation:
       raise error("Both LHS and RHS dilations are set.")
     # This is a non-dilated or atrous convolution
     if list(lhs_dilation) == no_dilation:
@@ -1687,14 +1676,14 @@ def _dot_general(lhs, rhs, *, dimension_numbers,
     dnums_proto.lhs_batch_dimensions.extend(lhs_batch)
     dnums_proto.rhs_batch_dimensions.extend(rhs_batch)
     precision_config_proto = _precision_config_proto(precision)
-    res = tfxla.dot_general(
+    return tfxla.dot_general(
         lhs,
         rhs,
         dnums_proto,
         precision_config_proto,
         preferred_element_type=preferred_element_type,
-        use_v2=True)
-    return res
+        use_v2=True,
+    )
 
   # This condition ensures that:
   # 1) the batch dimensions are ordered in the same way in lhs and rhs (this is
@@ -1736,8 +1725,8 @@ def _dot_general(lhs, rhs, *, dimension_numbers,
       rhs = tf.expand_dims(rhs, rhs_ndim)
       squeeze_idxs.append(len(rhs.shape) - 1)
     result = tf.linalg.matmul(lhs, rhs)
-    if len(squeeze_idxs) != 0:
-      assert all([result.shape[i] == 1 for i in squeeze_idxs])
+    if squeeze_idxs:
+      assert all(result.shape[i] == 1 for i in squeeze_idxs)
       result = tf.squeeze(result, squeeze_idxs)
     return result
 
@@ -1767,8 +1756,7 @@ def _dot_general(lhs, rhs, *, dimension_numbers,
   out_axis_ids = list(
       filter(not_none, batch_ids + lhs_out_axis_ids + rhs_out_axis_ids))
   assert lhs.dtype == rhs.dtype
-  spec = "{},{}->{}".format("".join(lhs_axis_ids), "".join(rhs_axis_ids),
-                            "".join(out_axis_ids))
+  spec = f'{"".join(lhs_axis_ids)},{"".join(rhs_axis_ids)}->{"".join(out_axis_ids)}'
   return tf.linalg.einsum(spec, lhs, rhs)
 
 
@@ -1814,8 +1802,7 @@ def _pad(operand, padding_value, *, padding_config,
   del _in_avals
   low, high, interior = util.unzip3(padding_config)
   if _thread_local_state.enable_xla:
-    out = tfxla.pad(operand, padding_value, low, high, interior)
-    return out
+    return tfxla.pad(operand, padding_value, low, high, interior)
 
   if all(lo >= 0 and hi >= 0 and i == 0 for lo, hi, i in padding_config):
     return tf.pad(
@@ -1871,12 +1858,17 @@ def _argminmax(is_min: bool, operand: TfVal, axes: Sequence[int],
       value_comparator = lax.gt
       get_identity = lax._get_max_identity
 
-    res = _convert_jax_impl(
+    return _convert_jax_impl(
         partial(lax._compute_argminmax, value_comparator, get_identity),
-        multiple_results=False, extra_name_stack=extra_name_stack)(
-        operand, index_dtype=index_dtype, axes=axes,
-        _in_avals=_in_avals, _out_aval=_out_aval)
-    return res
+        multiple_results=False,
+        extra_name_stack=extra_name_stack,
+    )(
+        operand,
+        index_dtype=index_dtype,
+        axes=axes,
+        _in_avals=_in_avals,
+        _out_aval=_out_aval,
+    )
 
   # The following is known to diverge from JAX behavior for NaN.
   axis, = axes
@@ -2210,7 +2202,7 @@ def _reduce(*operands: TfVal,
   # reducer takes op1[i], op2[i], ..., init_val1, init_val2, ...
   nr_operands = len(operands) // 2
   init_vals = operands[nr_operands:]
-  operands = operands[0:nr_operands]
+  operands = operands[:nr_operands]
 
   reducer_arg_spec = tuple([tf.TensorSpec((), op.dtype) for op in init_vals] * 2)
 
@@ -2292,11 +2284,11 @@ tf_impl_with_avals[lax.select_and_scatter_add_p] = _select_and_scatter_add
 
 
 def _threefry2x32_jax_impl(*args: TfVal, _in_avals, _out_aval):
-  res = _convert_jax_impl(
+  return _convert_jax_impl(
       partial(jax._src.random._threefry2x32_lowering, use_rolled_loops=False),
-      multiple_results=True, extra_name_stack="threefry")(
-          *args, _in_avals=_in_avals, _out_aval=_out_aval)
-  return res
+      multiple_results=True,
+      extra_name_stack="threefry",
+  )(*args, _in_avals=_in_avals, _out_aval=_out_aval)
 
 
 tf_impl_with_avals[jax.random.threefry2x32_p] = _threefry2x32_jax_impl
@@ -2382,11 +2374,11 @@ def _gather_using_tf_gather(operand: TfVal, start_indices: TfVal, *,
   op_shape = _in_avals[0].shape
   start_indices_shape = _in_avals[1].shape
   assert len(op_shape) == len(slice_sizes)
-  if not (len(op_shape) >= 1 and
-          len(dimension_numbers.start_index_map) == 1 and
-          len(dimension_numbers.collapsed_slice_dims) == 1 and
-          dimension_numbers.collapsed_slice_dims[0] == dimension_numbers.start_index_map[0] and
-          len(dimension_numbers.offset_dims) == len(op_shape) - 1):
+  if (len(op_shape) < 1 or len(dimension_numbers.start_index_map) != 1
+      or len(dimension_numbers.collapsed_slice_dims) != 1
+      or dimension_numbers.collapsed_slice_dims[0] !=
+      dimension_numbers.start_index_map[0]
+      or len(dimension_numbers.offset_dims) != len(op_shape) - 1):
     raise _xla_disabled_error(
         "gather",
         f"unsupported dimension_numbers '{dimension_numbers}'; op_shape={op_shape}.")
@@ -2435,16 +2427,12 @@ def _gather(operand, start_indices, *, dimension_numbers, slice_sizes,
 
   if len(_in_avals[1].shape) == 1:
     # Use tf.slice if `start_indices` is a 1D array.
-    try:
+    with contextlib.suppress(NotImplementedError):
       return _gather_using_tf_slice(operand, start_indices,
                                     dimension_numbers=dimension_numbers,
                                     slice_sizes=slice_sizes,
                                     _in_avals=_in_avals,
                                     _out_aval=_out_aval)
-    except NotImplementedError:
-      # If `_gather_using_tf_slice` fails, don't give up yet.
-      pass
-
   return _gather_using_tf_gather(operand, start_indices,
                                  dimension_numbers=dimension_numbers,
                                  slice_sizes=slice_sizes,
@@ -2478,8 +2466,7 @@ def _dynamic_slice(operand, *start_indices, slice_sizes,
   slice_sizes = _eval_shape(slice_sizes)
 
   if _thread_local_state.enable_xla:
-    res = tfxla.dynamic_slice(operand, start_indices, size_indices=slice_sizes)
-    return res
+    return tfxla.dynamic_slice(operand, start_indices, size_indices=slice_sizes)
 
   operand_shape = _eval_shape(_in_avals[0].shape)
   start_indices = _clip(operand_shape, start_indices, slice_sizes)
@@ -2688,9 +2675,7 @@ def _top_k(operand: TfVal, k: int) -> Tuple[TfVal, TfVal]:
       return tf.uint32
     if tf_dtype in [tf.int8, tf.int16]:
       return tf.int32
-    if tf_dtype is tf.float16:
-      return tf.float32
-    return None
+    return tf.float32 if tf_dtype is tf.float16 else None
 
   conversion_dtype = promote_tf_dtype(operand.dtype)
   if conversion_dtype:
@@ -2799,13 +2784,13 @@ def _eig(operand: TfVal, compute_left_eigenvectors: bool,
            "to True.")
     raise NotImplementedError(msg)
   elif not (compute_left_eigenvectors or compute_right_eigenvectors):
-    return tuple([tf.linalg.eigvals(operand)])
+    return (tf.linalg.eigvals(operand), )
   elif compute_right_eigenvectors:
     return tuple(tf.linalg.eig(operand))
   else:  # compute_left_eigenvectors == True
     wH, vl = tf.linalg.eig(tf.linalg.adjoint(operand))
     wHH = tf.math.conj(wH)
-    return tuple([wHH, vl])
+    return wHH, vl
 
 
 tf_impl[lax_linalg.eig_p] = _eig
@@ -2854,9 +2839,9 @@ def _triangular_solve(a: TfVal, b: TfVal, *, left_side: bool, lower: bool,
     lower = not lower
   # adjoint == transpose for real dtypes, so special care need only be taken
   # for complex types.
-  if a.dtype in [tf.complex64, tf.complex128]:
-    if (transpose_a and not conjugate_a) or (not transpose_a and conjugate_a):
-      a = tf.math.conj(a)
+  if a.dtype in [tf.complex64, tf.complex128] and (
+      (transpose_a and not conjugate_a) or (not transpose_a and conjugate_a)):
+    a = tf.math.conj(a)
   result = tf.linalg.triangular_solve(a, b, lower=lower, adjoint=transpose_a)
   if not left_side:
     result = tf.transpose(result, transpose_dimensions)
@@ -2962,11 +2947,8 @@ def _sharded_call(f: lu.WrappedFun, vals: Sequence[TfVal],
   out_parts_flat = out_parts_thunk()
   assert len(out_parts_flat) == len(
       vals_out), f"expected {len(out_parts_flat)} == {len(vals_out)}"
-  sharded_vals_out = [
-      (split_to_logical_devices(val, val_part), val_aval)
-      for (val, val_aval), val_part in zip(vals_out, out_parts_flat)
-  ]
-  return sharded_vals_out
+  return [(split_to_logical_devices(val, val_part), val_aval)
+          for (val, val_aval), val_part in zip(vals_out, out_parts_flat)]
 
 
 def _sharded_jit_sharding_constraint(arg: TfVal, *,

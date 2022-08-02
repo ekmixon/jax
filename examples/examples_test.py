@@ -46,30 +46,19 @@ def _CheckShapeAgreement(test_case, init_fun, apply_fun, input_shape):
 
 class ExamplesTest(jtu.JaxTestCase):
 
-  @parameterized.named_parameters(
-      {"testcase_name": "_input_shape={}".format(input_shape),
-       "input_shape": input_shape}
-      for input_shape in [(2, 20, 25, 2)])
+  @parameterized.named_parameters({"testcase_name": f"_input_shape={input_shape}", "input_shape": input_shape} for input_shape in [(2, 20, 25, 2)])
   @jtu.skip_on_flag('jax_enable_x64', True)
   def testIdentityBlockShape(self, input_shape):
     init_fun, apply_fun = resnet50.IdentityBlock(2, (4, 3))
     _CheckShapeAgreement(self, init_fun, apply_fun, input_shape)
 
-  @parameterized.named_parameters(
-      {"testcase_name": "_input_shape={}".format(input_shape),
-       "input_shape": input_shape}
-      for input_shape in [(2, 20, 25, 3)])
+  @parameterized.named_parameters({"testcase_name": f"_input_shape={input_shape}", "input_shape": input_shape} for input_shape in [(2, 20, 25, 3)])
   @jtu.skip_on_flag('jax_enable_x64', True)
   def testConvBlockShape(self, input_shape):
     init_fun, apply_fun = resnet50.ConvBlock(3, (2, 3, 4))
     _CheckShapeAgreement(self, init_fun, apply_fun, input_shape)
 
-  @parameterized.named_parameters(
-      {"testcase_name": "_num_classes={}_input_shape={}"
-                        .format(num_classes, input_shape),
-       "num_classes": num_classes, "input_shape": input_shape}
-      for num_classes in [5, 10]
-      for input_shape in [(224, 224, 3, 2)])
+  @parameterized.named_parameters({"testcase_name": f"_num_classes={num_classes}_input_shape={input_shape}", "num_classes": num_classes, "input_shape": input_shape} for num_classes in [5, 10] for input_shape in [(224, 224, 3, 2)])
   @jtu.skip_on_flag('jax_enable_x64', True)
   def testResNet50Shape(self, num_classes, input_shape):
     init_fun, apply_fun = resnet50.ResNet50(num_classes)

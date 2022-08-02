@@ -109,8 +109,7 @@ def _bit_stats(bits):
 
 def _threefry2x32_abstract_eval(*args):
   if any(a.dtype != jnp.uint32 for a in args):
-    raise TypeError("Arguments to threefry2x32 must have uint32 type, got {}"
-                    .format(args))
+    raise TypeError(f"Arguments to threefry2x32 must have uint32 type, got {args}")
   if all(isinstance(arg, core.ShapedArray) for arg in args):
     shape = lax._broadcasting_shape_rule(*args)
     named_shape = core.join_named_shapes(*(a.named_shape for a in args))
@@ -259,7 +258,7 @@ def split(key: jnp.ndarray, num: int = 2) -> jnp.ndarray:
   Returns:
     An array with shape (num, 2) and dtype uint32 representing `num` new keys.
   """
-  return _split(key, int(num))  # type: ignore
+  return _split(key, num)
 
 @partial(jit, static_argnums=(1,))
 def _split(key, num) -> jnp.ndarray:
@@ -624,12 +623,11 @@ def choice(key: jnp.ndarray,
       p_cuml = jnp.cumsum(p)
       r = p_cuml[-1] * (1 - uniform(key, shape))
       ind = jnp.searchsorted(p_cuml, r)
-      result = ind if np.ndim(a) == 0 else a[ind]  # type: ignore[index]
     else:
       # Gumbel top-k trick: https://timvieira.github.io/blog/post/2019/09/16/algorithms-for-sampling-without-replacement/
       g = -gumbel(key, (n_inputs,)) - jnp.log(p)
       ind = jnp.argsort(g)[:n_draws]
-      result = ind if np.ndim(a) == 0 else a[ind]  # type: ignore[index]
+    result = ind if np.ndim(a) == 0 else a[ind]  # type: ignore[index]
   return result.reshape(shape)
 
 
@@ -657,16 +655,15 @@ def normal(key: jnp.ndarray,
 
 @partial(jit, static_argnums=(1, 2))
 def _normal(key, shape, dtype) -> jnp.ndarray:
-  if dtypes.issubdtype(dtype, np.complexfloating):
-    sqrt2 = np.array(np.sqrt(2), dtype)
-
-    key_re, key_im = split(key)
-    real_dtype = np.array(0, dtype).real.dtype
-    _re = _normal_real(key_re, shape, real_dtype)
-    _im = _normal_real(key_im, shape, real_dtype)
-    return (_re + 1j * _im) / sqrt2
-  else:
+  if not dtypes.issubdtype(dtype, np.complexfloating):
     return _normal_real(key, shape, dtype) # type: ignore
+  sqrt2 = np.array(np.sqrt(2), dtype)
+
+  key_re, key_im = split(key)
+  real_dtype = np.array(0, dtype).real.dtype
+  _re = _normal_real(key_re, shape, real_dtype)
+  _im = _normal_real(key_im, shape, real_dtype)
+  return (_re + 1j * _im) / sqrt2
 
 @partial(jit, static_argnums=(1, 2))
 def _normal_real(key, shape, dtype) -> jnp.ndarray:
@@ -716,10 +713,10 @@ def multivariate_normal(key: jnp.ndarray,
 
 @partial(jit, static_argnums=(3, 4, 5))
 def _multivariate_normal(key, mean, cov, shape, dtype, method) -> jnp.ndarray:
-  if not np.ndim(mean) >= 1:
+  if np.ndim(mean) < 1:
     msg = "multivariate_normal requires mean.ndim >= 1, got mean.ndim == {}"
     raise ValueError(msg.format(np.ndim(mean)))
-  if not np.ndim(cov) >= 2:
+  if np.ndim(cov) < 2:
     msg = "multivariate_normal requires cov.ndim >= 2, got cov.ndim == {}"
     raise ValueError(msg.format(np.ndim(cov)))
   n = mean.shape[-1]
@@ -949,7 +946,7 @@ def dirichlet(key: jnp.ndarray,
 
 @partial(jit, static_argnums=(2, 3))
 def _dirichlet(key, alpha, shape, dtype):
-  if not np.ndim(alpha) >= 1:
+  if np.ndim(alpha) < 1:
     msg = "dirichlet requires alpha.ndim >= 1, got alpha.ndim == {}"
     raise ValueError(msg.format(np.ndim(alpha)))
 

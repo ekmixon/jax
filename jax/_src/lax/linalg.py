@@ -129,9 +129,8 @@ def lu_pivots_to_permutation(pivots, permutation_size: int):
   Returns:
     An int32 array of shape (..., permutation_size).
   """
-  permutation = lu_pivots_to_permutation_p.bind(
-      pivots, permutation_size=int(permutation_size))
-  return permutation
+  return lu_pivots_to_permutation_p.bind(
+      pivots, permutation_size=permutation_size)
 
 
 def lu(x):
@@ -385,20 +384,20 @@ def eig_translation_rule(c, operand, *, compute_left_eigenvectors,
 
 def eig_abstract_eval(operand, *, compute_left_eigenvectors,
                       compute_right_eigenvectors):
-  if isinstance(operand, ShapedArray):
-    if operand.ndim < 2 or operand.shape[-2] != operand.shape[-1]:
-      raise ValueError("Argument to nonsymmetric eigendecomposition must have "
-                       "shape [..., n, n], got shape {}".format(operand.shape))
-
-    batch_dims = operand.shape[:-2]
-    n = operand.shape[-1]
-    dtype = np.complex64 if dtypes.finfo(operand.dtype).bits == 32 else np.complex128
-    dtype = dtypes.canonicalize_dtype(dtype)
-    vl = vr = operand.update(shape=batch_dims + (n, n), dtype=dtype)
-    w = operand.update(shape=batch_dims + (n,), dtype=dtype)
-  else:
+  if not isinstance(operand, ShapedArray):
     raise NotImplementedError
 
+  if operand.ndim < 2 or operand.shape[-2] != operand.shape[-1]:
+    raise ValueError(
+        f"Argument to nonsymmetric eigendecomposition must have shape [..., n, n], got shape {operand.shape}"
+    )
+
+  batch_dims = operand.shape[:-2]
+  n = operand.shape[-1]
+  dtype = np.complex64 if dtypes.finfo(operand.dtype).bits == 32 else np.complex128
+  dtype = dtypes.canonicalize_dtype(dtype)
+  vl = vr = operand.update(shape=batch_dims + (n, n), dtype=dtype)
+  w = operand.update(shape=batch_dims + (n,), dtype=dtype)
   output = [w]
   if compute_left_eigenvectors:
     output.append(vl)
@@ -485,8 +484,8 @@ def eigh_abstract_eval(operand, lower):
   if isinstance(operand, ShapedArray):
     if operand.ndim < 2 or operand.shape[-2] != operand.shape[-1]:
       raise ValueError(
-        "Argument to symmetric eigendecomposition must have shape [..., n, n],"
-        "got shape {}".format(operand.shape))
+          f"Argument to symmetric eigendecomposition must have shape [..., n, n],got shape {operand.shape}"
+      )
 
     batch_dims = operand.shape[:-2]
     n = operand.shape[-1]
@@ -608,16 +607,10 @@ def triangular_solve_jvp_rule_a(
   # cheaper.
   if left_side:
     assert g_a.shape[-2:] == a.shape[-2:] == (m, m) and ans.shape[-2:] == (m, n)
-    if m > n:
-      return a_inverse(dot(g_a, ans))  # A^{-1} (∂A X)
-    else:
-      return dot(a_inverse(g_a), ans)  # (A^{-1} ∂A) X
+    return a_inverse(dot(g_a, ans)) if m > n else dot(a_inverse(g_a), ans)
   else:
     assert g_a.shape[-2:] == a.shape[-2:] == (n, n) and ans.shape[-2:] == (m, n)
-    if m < n:
-      return a_inverse(dot(ans, g_a))  # (X ∂A) A^{-1}
-    else:
-      return dot(ans, a_inverse(g_a))  # X (∂A A^{-1})
+    return a_inverse(dot(ans, g_a)) if m < n else dot(ans, a_inverse(g_a))
 
 def triangular_solve_transpose_rule(
     cotangent, a, b, left_side, lower, transpose_a, conjugate_a,
@@ -695,15 +688,14 @@ def _triangular_solve_cpu_translation_rule(
     return lapack.jax_trsm(
       c, xb.constant(c, np.array(1, dtype=dtype)),
       a, b, left_side, lower, transpose_a, conjugate_a, unit_diagonal)
-  else:
     # Fall back to the HLO implementation for unsupported types or batching.
     # TODO: Consider swapping XLA for LAPACK in batched case
-    if not transpose_a:
-      transpose = xops.TriangularSolveOptions_Transpose.NO_TRANSPOSE
-    else:
-      transpose = (xops.TriangularSolveOptions_Transpose.ADJOINT if conjugate_a
-                   else xops.TriangularSolveOptions_Transpose.TRANSPOSE)
-    return xops.TriangularSolve(a, b, left_side, lower, unit_diagonal, transpose)
+  if transpose_a:
+    transpose = (xops.TriangularSolveOptions_Transpose.ADJOINT if conjugate_a
+                 else xops.TriangularSolveOptions_Transpose.TRANSPOSE)
+  else:
+    transpose = xops.TriangularSolveOptions_Transpose.NO_TRANSPOSE
+  return xops.TriangularSolve(a, b, left_side, lower, unit_diagonal, transpose)
 
 xla.backend_specific_translations['cpu'][triangular_solve_p] = \
   _triangular_solve_cpu_translation_rule
@@ -721,15 +713,14 @@ def _triangular_solve_gpu_translation_rule(trsm_impl,
     return trsm_impl(
       c, a, b, left_side, lower, transpose_a,
       conjugate_a, unit_diagonal)
-  else:
     # Use the XLA implementation for unbatched triangular_solve.
-    if not transpose_a:
-      transpose = xops.TriangularSolveOptions_Transpose.NO_TRANSPOSE
-    else:
-      transpose = (xops.TriangularSolveOptions_Transpose.ADJOINT if conjugate_a
-                   else xops.TriangularSolveOptions_Transpose.TRANSPOSE)
-    return xops.TriangularSolve(a, b, left_side, lower, unit_diagonal,
-                                transpose)
+  if transpose_a:
+    transpose = (xops.TriangularSolveOptions_Transpose.ADJOINT if conjugate_a
+                 else xops.TriangularSolveOptions_Transpose.TRANSPOSE)
+  else:
+    transpose = xops.TriangularSolveOptions_Transpose.NO_TRANSPOSE
+  return xops.TriangularSolve(a, b, left_side, lower, unit_diagonal,
+                              transpose)
 
 if cusolver is not None:
   xla.backend_specific_translations['gpu'][triangular_solve_p] = \
@@ -783,23 +774,21 @@ def _generic_lu_pivots_to_permutation(swaps, m):
 
 def _lu_pivots_to_permutation_abstract_eval(pivots, *, permutation_size):
   pivots = raise_to_shaped(pivots)
-  if isinstance(pivots, ShapedArray):
-    if pivots.ndim < 1 or pivots.dtype != np.dtype(np.int32):
-      raise ValueError(
-          'Argument to lu_pivots_to_permutation must have rank >= 1 and dtype '
-          'int32. Got shape={} and dtype={}'.format(pivots.shape, pivots.dtype))
+  if not isinstance(pivots, ShapedArray):
+    return pivots
 
-    if permutation_size < pivots.shape[-1]:
-      raise ValueError(
-          'Output permutation size {} has to exceed the trailing dimension of '
-          'the pivots. Got shape {}'.format(permutation_size, pivots.shape))
+  if pivots.ndim < 1 or pivots.dtype != np.dtype(np.int32):
+    raise ValueError(
+        f'Argument to lu_pivots_to_permutation must have rank >= 1 and dtype int32. Got shape={pivots.shape} and dtype={pivots.dtype}'
+    )
 
-    batch_dims = pivots.shape[:-1]
-    permutations = pivots.update(shape=batch_dims + (permutation_size,))
-  else:
-    permutations = pivots
+  if permutation_size < pivots.shape[-1]:
+    raise ValueError(
+        f'Output permutation size {permutation_size} has to exceed the trailing dimension of the pivots. Got shape {pivots.shape}'
+    )
 
-  return permutations
+  batch_dims = pivots.shape[:-1]
+  return pivots.update(shape=batch_dims + (permutation_size,))
 
 
 def _lu_pivots_to_permutation_batching_rule(batched_args, batch_dims, *,
@@ -1008,11 +997,10 @@ def _lu_cpu_gpu_translation_rule(getrf_impl, c, operand, backend):
 
 
 def _lu_tpu_translation_rule(c, operand):
-  if hasattr(xops, "LU"):
-    lu, pivot, perm = xops.LU(operand)
-    return xops.Tuple(c, [lu, pivot, perm])
-  else:
+  if not hasattr(xops, "LU"):
     return xla.lower_fun(_lu_python, multiple_results=True)(c, operand)
+  lu, pivot, perm = xops.LU(operand)
+  return xops.Tuple(c, [lu, pivot, perm])
 
 
 lu_p = Primitive('lu')
@@ -1045,7 +1033,7 @@ def _lu_solve_core(lu, permutation, b, trans):
     x = x[permutation, :]
     x = triangular_solve(lu, x, left_side=True, lower=True, unit_diagonal=True)
     x = triangular_solve(lu, x, left_side=True, lower=False)
-  elif trans == 1 or trans == 2:
+  elif trans in [1, 2]:
     conj = trans == 2
     x = triangular_solve(lu, x, left_side=True, lower=False, transpose_a=True,
                          conjugate_a=conj)
@@ -1053,36 +1041,33 @@ def _lu_solve_core(lu, permutation, b, trans):
                          transpose_a=True, conjugate_a=conj)
     x = x[jnp.argsort(permutation), :]
   else:
-    raise ValueError("'trans' value must be 0, 1, or 2, got {}".format(trans))
+    raise ValueError(f"'trans' value must be 0, 1, or 2, got {trans}")
   return lax.reshape(x, b.shape)
 
 
 @partial(api.jit, static_argnums=(3,))
 def _lu_solve(lu, permutation, b, trans):
   if len(lu.shape) < 2 or lu.shape[-1] != lu.shape[-2]:
-    raise ValueError("last two dimensions of LU decomposition must be equal, "
-                     "got shape {}".format(lu.shape))
+    raise ValueError(
+        f"last two dimensions of LU decomposition must be equal, got shape {lu.shape}"
+    )
   if len(b.shape) < 1:
-    raise ValueError("b matrix must have rank >= 1, got shape {}"
-                     .format(b.shape))
+    raise ValueError(f"b matrix must have rank >= 1, got shape {b.shape}")
   # Broadcasting follows NumPy's convention for linalg.solve: the RHS is
   # treated as a (batched) vector if the number of dimensions differ by 1.
   # Otherwise, broadcasting rules apply.
   rhs_vector = lu.ndim == b.ndim + 1
   if rhs_vector:
-    if b.shape[-1] != lu.shape[-1]:
-      raise ValueError("When LU decomposition matrix and b have the same "
-                       "number of dimensions, last axis of LU decomposition "
-                       "matrix (shape {}) and b array (shape {}) must match"
-                       .format(lu.shape, b.shape))
-    b = b[..., jnp.newaxis]
-  else:
-    if b.shape[-2] != lu.shape[-1]:
-      raise ValueError("When LU decomposition matrix and b different "
-                       "numbers of dimensions, last axis of LU decomposition "
-                       "matrix (shape {}) and second to last axis of b array "
-                       "(shape {}) must match"
-                       .format(lu.shape, b.shape))
+    if b.shape[-1] == lu.shape[-1]:
+      b = b[..., jnp.newaxis]
+    else:
+      raise ValueError(
+          f"When LU decomposition matrix and b have the same number of dimensions, last axis of LU decomposition matrix (shape {lu.shape}) and b array (shape {b.shape}) must match"
+      )
+  elif b.shape[-2] != lu.shape[-1]:
+    raise ValueError(
+        f"When LU decomposition matrix and b different numbers of dimensions, last axis of LU decomposition matrix (shape {lu.shape}) and second to last axis of b array (shape {b.shape}) must match"
+    )
   x = _lu_solve_core(lu, permutation, b, trans)
   return x[..., 0] if rhs_vector else x
 
@@ -1170,9 +1155,6 @@ def _qr_cpu_gpu_translation_rule(geqrf_impl, orgqr_impl, c, operand,
                              _nan_like(c, q))
     r = _broadcasting_select(c, xops.Reshape(ok, batch_dims + (1, 1)), r,
                              _nan_like(c, r))
-  else:
-    pass # rocsolver does not return info
-
   r = xla.lower_fun(jnp.triu, multiple_results=False)(c, r)
   return xops.Tuple(c, [q, r])
 
@@ -1217,30 +1199,26 @@ def svd_translation_rule(c, operand, full_matrices, compute_uv):
     u = xops.SliceInDim(u, 0, min(m, n), stride=1, dimno=len(shape) - 1)
     vt = xops.SliceInDim(vt, 0, min(m, n), stride=1, dimno=len(shape) - 2)
 
-  if not compute_uv:
-    return xops.Tuple(c, [s])
-  else:
-    return xops.Tuple(c, [s, u, vt])
+  return xops.Tuple(c, [s, u, vt]) if compute_uv else xops.Tuple(c, [s])
 
 
 def svd_abstract_eval(operand, full_matrices, compute_uv):
-  if isinstance(operand, ShapedArray):
-    if operand.ndim < 2:
-      raise ValueError("Argument to singular value decomposition must have ndims >= 2")
-
-    batch_dims = operand.shape[:-2]
-    m = operand.shape[-2]
-    n = operand.shape[-1]
-    s = operand.update(shape=batch_dims + (min(m, n),),
-                       dtype=lax_internal._complex_basetype(operand.dtype))
-    if compute_uv:
-      u = operand.update(shape=batch_dims + (m, m if full_matrices else min(m, n)))
-      vt = operand.update(shape=batch_dims + (n if full_matrices else min(m, n), n))
-      return s, u, vt
-    else:
-      return s,
-  else:
+  if not isinstance(operand, ShapedArray):
     raise NotImplementedError
+  if operand.ndim < 2:
+    raise ValueError("Argument to singular value decomposition must have ndims >= 2")
+
+  batch_dims = operand.shape[:-2]
+  m = operand.shape[-2]
+  n = operand.shape[-1]
+  s = operand.update(shape=batch_dims + (min(m, n),),
+                     dtype=lax_internal._complex_basetype(operand.dtype))
+  if compute_uv:
+    u = operand.update(shape=batch_dims + (m, m if full_matrices else min(m, n)))
+    vt = operand.update(shape=batch_dims + (n if full_matrices else min(m, n), n))
+    return s, u, vt
+  else:
+    return s,
 
 def svd_jvp_rule(primals, tangents, full_matrices, compute_uv):
   A, = primals
@@ -1330,10 +1308,7 @@ def svd_batching_rule(batched_args, batch_dims, full_matrices, compute_uv):
   x = batching.moveaxis(x, bd, 0)
   outs = svd_p.bind(x, full_matrices=full_matrices, compute_uv=compute_uv)
 
-  if compute_uv:
-    return outs, (0, 0, 0)
-  else:
-    return outs, (0,)
+  return (outs, (0, 0, 0)) if compute_uv else (outs, (0, ))
 
 svd_p = Primitive('svd')
 svd_p.multiple_results = True

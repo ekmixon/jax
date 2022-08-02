@@ -25,7 +25,7 @@ from jax._src.util import safe_map as map, safe_zip as zip
 # See http://docs.scipy.org/doc/numpy/reference/c-api.generalized-ufuncs.html
 _DIMENSION_NAME = r'\w+'
 _CORE_DIMENSION_LIST = '(?:{0:}(?:,{0:})*)?'.format(_DIMENSION_NAME)
-_ARGUMENT = r'\({}\)'.format(_CORE_DIMENSION_LIST)
+_ARGUMENT = f'\({_CORE_DIMENSION_LIST}\)'
 _ARGUMENT_LIST = '{0:}(?:,{0:})*'.format(_ARGUMENT)
 _SIGNATURE = '^{0:}->{0:}$'.format(_ARGUMENT_LIST)
 
@@ -47,8 +47,7 @@ def _parse_gufunc_signature(
     Input and output core dimensions parsed from the signature.
   """
   if not re.match(_SIGNATURE, signature):
-    raise ValueError(
-        'not a valid gufunc signature: {}'.format(signature))
+    raise ValueError(f'not a valid gufunc signature: {signature}')
   args, retvals = ([tuple(re.findall(_DIMENSION_NAME, arg))
                    for arg in re.findall(_ARGUMENT, arg_list)]
                    for arg_list in signature.split('->'))
@@ -77,11 +76,10 @@ def _update_dim_sizes(
       raise ValueError(
           'input with shape %r does not have enough dimensions for all core '
           'dimensions %r %s' % (shape, core_dims, error_context))
-  else:
-    if len(shape) != num_core_dims:
-      raise ValueError(
-          'output shape %r does not match core dimensions %r %s'
-          % (shape, core_dims, error_context))
+  elif len(shape) != num_core_dims:
+    raise ValueError(
+        'output shape %r does not match core dimensions %r %s'
+        % (shape, core_dims, error_context))
 
   core_shape = shape[-num_core_dims:] if core_dims else ()
   for dim, size in zip(core_dims, core_shape):

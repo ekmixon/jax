@@ -105,9 +105,8 @@ def vars_by_fanout(jaxpr: core.Jaxpr):
   def fmt_key(var, eqn):
     if eqn is None:
       return f'{var} <- invar'
-    else:
-      src = source_info_util.summarize(eqn.source_info)
-      return f'{var} <- {eqn.primitive.name} @ {src}'
+    src = source_info_util.summarize(eqn.source_info)
+    return f'{var} <- {eqn.primitive.name} @ {src}'
 
   def hist(jaxpr, reads):
     return {fmt_key(var, var_def): len(var_refs)

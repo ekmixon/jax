@@ -185,7 +185,7 @@ class Scope(object):
     # TODO: share these checks with lax_control_flow.cond
     if len(np.shape(pred)) != 0:
       raise TypeError(
-        "Pred must be a scalar, got {} of shape {}.".format(pred, np.shape(pred)))
+          f"Pred must be a scalar, got {pred} of shape {np.shape(pred)}.")
 
     try:
       pred_dtype = np.result_type(pred)
@@ -225,7 +225,7 @@ class Scope(object):
     self._active_ranges.append(range_)
 
   def _pop_range(self, range_):
-    if not (range_ is self._active_ranges[-1]):
+    if range_ is not self._active_ranges[-1]:
       self._error_premature_exit_range()
     self._active_ranges.pop()
 
@@ -242,8 +242,7 @@ class Scope(object):
     """
     mt_val = self._mutable_state.get(key)
     if mt_val is None:
-      raise AttributeError(
-        "Reading uninitialized data '{}' from the scope.".format(key))
+      raise AttributeError(f"Reading uninitialized data '{key}' from the scope.")
     return mt_val
 
   def __setattr__(self, key, value):
@@ -256,8 +255,7 @@ class Scope(object):
     else:
       if self._active_ranges:
         if key not in self._mutable_state:
-          raise ValueError(
-            "New mutable state '{}' cannot be created inside a loop.".format(key))
+          raise ValueError(f"New mutable state '{key}' cannot be created inside a loop.")
         assert key in self._mutable_state_aval
         old_aval = self._mutable_state_aval[key]
         flat_values, flat_tree = tree_util.tree_flatten(value)
@@ -273,15 +271,14 @@ class Scope(object):
 
   def __exit__(self, exc_type, exc_val, exc_tb):
     try:
-      if exc_type is None:
-        if self._active_ranges:  # We have some ranges that we did not exit properly
-          self._error_premature_exit_range()
-        return True
-      else:
+      if exc_type is not None:
         # The exception may come from inside one or more ranges. We let the current
         # exception propagate, assuming it terminates the tracing. If not, the
         # tracers may be left in an inconsistent state.
         return False  # re-raise
+      if self._active_ranges:  # We have some ranges that we did not exit properly
+        self._error_premature_exit_range()
+      return True
     finally:
       # Ensure we leave the global trace_state as we found it
       while self._count_subtraces > 0:
@@ -333,10 +330,7 @@ class _BodyTracer(object):
 
   def location(self):
     """A multiline string representing the source location of the range."""
-    if self.stack is not None:
-      return "   ".join(self.stack.format())
-    else:
-      return ""
+    return "   ".join(self.stack.format()) if self.stack is not None else ""
 
   def __iter__(self):
     """Called before starting the first iteration."""
@@ -423,8 +417,8 @@ class _BodyTracer(object):
     # End the subtrace for the loop body, before we trace the condition
     self.scope.end_subtrace()
 
-    carried_init_val = tuple([self.carried_state_initial[ms]
-                              for ms in self.carried_state_names])
+    carried_init_val = tuple(
+        self.carried_state_initial[ms] for ms in self.carried_state_names)
     carried_init_vals, carried_tree = tree_util.tree_flatten(carried_init_val)
     assert len(carried_init_vals) == len(body_out_tracers)
 
@@ -562,7 +556,7 @@ class _WhileBuilder(_LoopBuilder):
       res = self.cond_func()
       # Conditional function is not allowed to modify the scope state
       for ms, init_ms in zip(carried_state_names, args):
-        if not (scope._mutable_state[ms] is init_ms):
+        if scope._mutable_state[ms] is not init_ms:
           raise ValueError(f"Conditional function modifies scope.{ms} field.")
       return res
 

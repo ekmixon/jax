@@ -31,7 +31,7 @@ class PrettyPrint:
 
   def annotate(self, length, msg):
     (i, s), *rest = self.lines
-    return PrettyPrint([(i, s.ljust(length) + f" [{msg}]")] + list(rest))
+    return PrettyPrint([(i, f"{s.ljust(length)} [{msg}]")] + list(rest))
 
   def __add__(self, rhs):
     return PrettyPrint(self.lines + rhs.lines)

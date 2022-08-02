@@ -237,12 +237,11 @@ def gelu(x: Array, approximate: bool = True) -> Array:
     x : input array
     approximate: whether to use the approximate or exact formulation.
   """
-  if approximate:
-    sqrt_2_over_pi = np.sqrt(2 / np.pi).astype(x.dtype)
-    cdf = 0.5 * (1.0 + jnp.tanh(sqrt_2_over_pi * (x + 0.044715 * (x ** 3))))
-    return x * cdf
-  else:
+  if not approximate:
     return jnp.array(x * (lax.erf(x / np.sqrt(2)) + 1) / 2, dtype=x.dtype)
+  sqrt_2_over_pi = np.sqrt(2 / np.pi).astype(x.dtype)
+  cdf = 0.5 * (1.0 + jnp.tanh(sqrt_2_over_pi * (x + 0.044715 * (x ** 3))))
+  return x * cdf
 
 def glu(x: Array, axis: int = -1) -> Array:
   """Gated linear unit activation function.

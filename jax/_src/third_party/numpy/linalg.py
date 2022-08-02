@@ -66,12 +66,11 @@ def tensorinv(a, ind=2):
   a = jnp.asarray(a)
   oldshape = a.shape
   prod = 1
-  if ind > 0:
-    invshape = oldshape[ind:] + oldshape[:ind]
-    for k in oldshape[ind:]:
-      prod *= k
-  else:
+  if ind <= 0:
     raise ValueError("Invalid ind argument.")
+  invshape = oldshape[ind:] + oldshape[:ind]
+  for k in oldshape[ind:]:
+    prod *= k
   a = a.reshape(prod, -1)
   ia = la.inv(a)
   return ia.reshape(*invshape)
@@ -83,7 +82,7 @@ def tensorsolve(a, b, axes=None):
   b = jnp.asarray(b)
   an = a.ndim
   if axes is not None:
-    allaxes = list(range(0, an))
+    allaxes = list(range(an))
     for k in axes:
       allaxes.remove(k)
       allaxes.insert(an, k)

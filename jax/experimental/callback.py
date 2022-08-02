@@ -89,7 +89,7 @@ def _contains_query(vals, query):
     if jnp.any(vals == query):
       raise FoundValue(str(query))
   else:
-    raise ValueError('Malformed Query: {}'.format(query))
+    raise ValueError(f'Malformed Query: {query}')
 
 ### Helper Functions
 
@@ -104,8 +104,7 @@ def callback_subtrace(main, *in_vals, **params):
   in_tracers = [CallbackTracer(trace, val) for val in in_vals]
   outs = yield in_tracers, params
   out_tracers = map(trace.full_raise, outs)
-  out_vals = [t.val for t in out_tracers]
-  yield out_vals
+  yield [t.val for t in out_tracers]
 
 @lu.transformation
 def _callback_fun(callback, strip_calls, *in_vals, **params):

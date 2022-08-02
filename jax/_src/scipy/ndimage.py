@@ -62,17 +62,18 @@ def _map_coordinates(input, coordinates, order, mode, cval):
   cval = jnp.asarray(cval, input.dtype)
 
   if len(coordinates) != input.ndim:
-    raise ValueError('coordinates must be a sequence of length input.ndim, but '
-                     '{} != {}'.format(len(coordinates), input.ndim))
+    raise ValueError(
+        f'coordinates must be a sequence of length input.ndim, but {len(coordinates)} != {input.ndim}'
+    )
 
   index_fixer = _INDEX_FIXERS.get(mode)
   if index_fixer is None:
     raise NotImplementedError(
-        'jax.scipy.ndimage.map_coordinates does not yet support mode {}. '
-        'Currently supported modes are {}.'.format(mode, set(_INDEX_FIXERS)))
+        f'jax.scipy.ndimage.map_coordinates does not yet support mode {mode}. Currently supported modes are {set(_INDEX_FIXERS)}.'
+    )
 
   if mode == 'constant':
-    is_valid = lambda index, size: (0 <= index) & (index < size)
+    is_valid = lambda index, size: (index >= 0) & (index < size)
   else:
     is_valid = lambda index, size: True
 

@@ -37,13 +37,11 @@ def _promote_arg_dtypes(*args):
   """Promotes `args` to a common inexact type."""
   def _to_inexact_type(type):
     return type if jnp.issubdtype(type, jnp.inexact) else jnp.float_
+
   inexact_types = [_to_inexact_type(jnp._dtype(arg)) for arg in args]
   dtype = dtypes.canonicalize_dtype(jnp.result_type(*inexact_types))
   args = [lax.convert_element_type(arg, dtype) for arg in args]
-  if len(args) == 1:
-    return args[0]
-  else:
-    return args
+  return args[0] if len(args) == 1 else args
 
 
 @_wraps(np.linalg.cholesky)
@@ -63,14 +61,15 @@ def matrix_power(a, n):
   a = _promote_arg_dtypes(jnp.asarray(a))
 
   if a.ndim < 2:
-    raise TypeError("{}-dimensional array given. Array must be at least "
-                    "two-dimensional".format(a.ndim))
+    raise TypeError(
+        f"{a.ndim}-dimensional array given. Array must be at least two-dimensional"
+    )
   if a.shape[-2] != a.shape[-1]:
     raise TypeError("Last 2 dimensions of the array must be square")
   try:
     n = operator.index(n)
   except TypeError as err:
-    raise TypeError("exponent must be an integer, got {}".format(n)) from err
+    raise TypeError(f"exponent must be an integer, got {n}") from err
 
   if n == 0:
     return jnp.broadcast_to(jnp.eye(a.shape[-2], dtype=a.dtype), a.shape)
@@ -196,8 +195,7 @@ def _cofactor_solve(a, b):
   a_shape = jnp.shape(a)
   b_shape = jnp.shape(b)
   a_ndims = len(a_shape)
-  if not (a_ndims >= 2 and a_shape[-1] == a_shape[-2]
-    and b_shape[-2:] == a_shape[-2:]):
+  if a_ndims < 2 or a_shape[-1] != a_shape[-2] or b_shape[-2:] != a_shape[-2:]:
     msg = ("The arguments to _cofactor_solve must have shapes "
            "a=[..., m, m] and b=[..., m, m]; got a={} and b={}")
     raise ValueError(msg.format(a_shape, b_shape))
@@ -301,7 +299,7 @@ def eigh(a, UPLO=None, symmetrize_input=True):
   elif UPLO == "U":
     lower = False
   else:
-    msg = "UPLO must be one of None, 'L', or 'U', got {}".format(UPLO)
+    msg = f"UPLO must be one of None, 'L', or 'U', got {UPLO}"
     raise ValueError(msg)
 
   a = _promote_arg_dtypes(jnp.asarray(a))
@@ -433,10 +431,10 @@ def _norm(x, ord, axis: Union[None, Tuple[int, ...], int], keepdims):
                      axis=row_axis, keepdims=keepdims)
     elif ord in ('nuc', 2, -2):
       x = jnp.moveaxis(x, axis, (-2, -1))
-      if ord == 2:
-        reducer = jnp.amax
-      elif ord == -2:
+      if ord == -2:
         reducer = jnp.amin
+      elif ord == 2:
+        reducer = jnp.amax
       else:
         reducer = jnp.sum
       y = reducer(svd(x, compute_uv=False), axis=-1)
@@ -447,10 +445,9 @@ def _norm(x, ord, axis: Union[None, Tuple[int, ...], int], keepdims):
         y = jnp.reshape(y, result_shape)
       return y
     else:
-      raise ValueError("Invalid order '{}' for matrix norm.".format(ord))
+      raise ValueError(f"Invalid order '{ord}' for matrix norm.")
   else:
-    raise ValueError(
-        "Invalid axis values ({}) for jnp.linalg.norm.".format(axis))
+    raise ValueError(f"Invalid axis values ({axis}) for jnp.linalg.norm.")
 
 @_wraps(np.linalg.norm)
 def norm(x, ord=None, axis=None, keepdims=False):
@@ -464,12 +461,10 @@ def qr(a, mode="reduced"):
   elif mode == "complete":
     full_matrices = True
   else:
-    raise ValueError("Unsupported QR decomposition mode '{}'".format(mode))
+    raise ValueError(f"Unsupported QR decomposition mode '{mode}'")
   a = _promote_arg_dtypes(jnp.asarray(a))
   q, r = lax_linalg.qr(a, full_matrices)
-  if mode == "r":
-    return r
-  return q, r
+  return r if mode == "r" else (q, r)
 
 
 @_wraps(np.linalg.solve)

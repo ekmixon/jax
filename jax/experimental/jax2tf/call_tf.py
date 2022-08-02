@@ -231,13 +231,8 @@ def _call_tf_abstract_eval(*_,
   # will eventually be lowered to XLA.
   _, callee_xla_comp = _concrete_function_and_xla_comp(function_flat_tf, args_flat_sig_tf)
   result_shape = callee_xla_comp.program_shape().result_shape()
-  if not result_shape.is_tuple():
-    # TF does not wrap singletons as tuples, but JAX expects tuples because
-    # call_tf is a multiple_results primitive.
-    result_shapes = (result_shape,)
-  else:
-    result_shapes = result_shape.tuple_shapes()
-
+  result_shapes = (result_shape.tuple_shapes() if result_shape.is_tuple() else
+                   (result_shape, ))
   # Canonicalize the results; e.g., makes them x32 if JAX is in 32-bit mode
   def res_shape_to_aval(res_shape: xla.XlaShape) -> core.AbstractValue:
     return core.ShapedArray(res_shape.dimensions(),
@@ -280,13 +275,11 @@ def _call_tf_translation_rule(builder: xla.XlaComputationBuilder, *args_op,
 
   res_tf = xops.Call(builder, callee_xla_comp, args_op + tuple(captured_ops))
   result_shape = callee_xla_comp.program_shape().result_shape()
-  if not result_shape.is_tuple():
-    # TF does not wrap singletons as tuples, but JAX expects tuples because
-    # call_tf is a multiple_results primitive.
-    res_untupled = (res_tf,)
-  else:
-    res_untupled = tuple(xops.GetTupleElement(res_tf, i)  # type: ignore
-                         for i in range(len(result_shape.tuple_shapes())))
+  res_untupled = (
+      tuple(
+          xops.GetTupleElement(res_tf, i)  # type: ignore
+          for i in range(len(result_shape.tuple_shapes())))
+      if result_shape.is_tuple() else (res_tf, ))
   # We may have to cast the results to x32 for JAX
   def canonicalize_res(res):
     res_dtype = builder.get_shape(res).numpy_dtype()
@@ -341,7 +334,6 @@ def _jax2tf_call_tf(*args: TfVal,
                     _out_aval: core.ShapedArray,
                     callable_flat_tf: Callable,
                     **_) -> TfVal:
-  res_tf_flat = callable_flat_tf(*args)
-  return res_tf_flat
+  return callable_flat_tf(*args)
 
 jax2tf_internal.tf_impl_with_avals[call_tf_p] = _jax2tf_call_tf

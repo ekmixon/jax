@@ -27,8 +27,7 @@ Array = Any
 
 map = safe_map
 
-jaxval_adders: Dict[type, Callable] = {}
-jaxval_adders[Unit] = lambda _, __: unit
+jaxval_adders: Dict[type, Callable] = {Unit: lambda _, __: unit}
 
 def add_jaxvals(x, y):
   if core.get_aval(x) is core.abstract_unit is core.get_aval(y):
@@ -52,8 +51,9 @@ jaxval_zeros_likers: Dict[type, Array] = {}
 def zeros_like_aval(aval):
   return aval_zeros_likers[type(aval)](aval)
 
-aval_zeros_likers: Dict[Type[core.AbstractValue], Array] = {}
-aval_zeros_likers[AbstractUnit] = lambda _: unit
+aval_zeros_likers: Dict[Type[core.AbstractValue], Array] = {
+    AbstractUnit: lambda _: unit
+}
 
 def zeros_like_jaxval(val):
   return zeros_like_p.bind(val)
@@ -71,7 +71,7 @@ class Zero:
   def __init__(self, aval):
     self.aval = aval
   def __repr__(self):
-    return 'Zero({})'.format(self.aval)
+    return f'Zero({self.aval})'
   @staticmethod
   def from_value(val):
     return Zero(raise_to_shaped(get_aval(val)))

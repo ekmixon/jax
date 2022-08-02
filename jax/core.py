@@ -159,10 +159,8 @@ class Var:
     self.aval = raise_to_shaped(aval)
 
   def __lt__(self, other):
-    if not isinstance(other, Var):
-      return NotImplemented
-    else:
-      return (self.count, self.suffix) < (other.count, other.suffix)
+    return ((self.count, self.suffix) < (other.count, other.suffix)
+            if isinstance(other, Var) else NotImplemented)
 
   def __repr__(self):
     rem = self.count
@@ -232,10 +230,7 @@ class Literal:
     assert False
 
   def __repr__(self):
-    if hasattr(self, 'hash'):
-      return '{}'.format(self.val)
-    else:
-      return 'Literal(val={})'.format(self.val)
+    return f'{self.val}' if hasattr(self, 'hash') else f'Literal(val={self.val})'
 
 literalable_types: Set[type] = set()
 
@@ -252,7 +247,7 @@ class Primitive:
     self.name = name
 
   def __repr__(self):
-    return '{}'.format(self.name)
+    return f'{self.name}'
 
 
   def bind(self, *args, **params):
@@ -277,12 +272,11 @@ class Primitive:
     return bind
 
   def impl(self, *args, **params):
-    raise NotImplementedError("Evaluation rule for '{}' not implemented"
-                              .format(self.name))
+    raise NotImplementedError(f"Evaluation rule for '{self.name}' not implemented")
 
   def abstract_eval(self, *args, **params):
-    raise NotImplementedError("Abstract evaluation for '{}' not implemented"
-                              .format(self.name))
+    raise NotImplementedError(
+        f"Abstract evaluation for '{self.name}' not implemented")
 
 
 # -------------------- lifting --------------------
@@ -297,13 +291,12 @@ def extract_call_jaxpr(
   Returns the subjaxpr and the params without the "call_jaxpr" value. If this is
   not a call primitive then returns (None, params).
   """
-  if not (primitive.call_primitive or primitive.map_primitive):
+  if not primitive.call_primitive and not primitive.map_primitive:
     return (None, params)
-  else:
-    assert "call_jaxpr" in params
-    new_params = dict(params)
-    del new_params["call_jaxpr"]
-    return (params["call_jaxpr"], new_params)
+  assert "call_jaxpr" in params
+  new_params = dict(params)
+  del new_params["call_jaxpr"]
+  return (params["call_jaxpr"], new_params)
 
 
 def traverse_jaxpr_params(f, params):
@@ -315,10 +308,7 @@ def traverse_jaxpr_params(f, params):
 
 def eval_jaxpr(jaxpr: Jaxpr, consts, *args):
   def read(v):
-    if type(v) is Literal:
-      return v.val
-    else:
-      return env[v]
+    return v.val if type(v) is Literal else env[v]
 
   def write(v, val):
     env[v] = val
@@ -408,8 +398,7 @@ class Trace:
     raise NotImplementedError("must override")
 
   def __repr__(self):
-    return '{}(level={}/{})'.format(
-        self.__class__.__name__, self.level, self.sublevel)
+    return f'{self.__class__.__name__}(level={self.level}/{self.sublevel})'
 
   def process_call(self, call_primitive, f, tracers, params):
     msg = (f"{type(self)} must override process_call to handle call-like "
@@ -438,7 +427,7 @@ def escaped_tracer_error(tracer, detail=None):
          "The functions being transformed should not save traced values to "
          "global state.")
   if detail:
-    msg += " Detail: {}.".format(detail)
+    msg += f" Detail: {detail}."
   try:
     line_info = tracer._line_info
   except AttributeError:
@@ -554,8 +543,7 @@ class Tracer:
       attr = getattr(self.aval, name)
     except KeyError as err:
       raise AttributeError(
-          "{} has no attribute {}".format(self.__class__.__name__, name)
-      ) from err
+          f"{self.__class__.__name__} has no attribute {name}") from err
     else:
       t = type(attr)
       if t is aval_property:
@@ -566,11 +554,10 @@ class Tracer:
         return attr
 
   def __repr__(self):
-    base = pp('Traced<{}>with<{}>'.format(self.aval, self._trace))
-    contents = self._contents()
-    if contents:
-      base += pp('  with ') >> vcat(pp('{} = '.format(name)) >> pp_payload
-                                    for name, pp_payload in contents)
+    base = pp(f'Traced<{self.aval}>with<{self._trace}>')
+    if contents := self._contents():
+      base += pp('  with ') >> vcat(
+          pp(f'{name} = ') >> pp_payload for name, pp_payload in contents)
     return str(base)
 
   def _contents(self):
@@ -628,7 +615,7 @@ class MainTrace:
     self.payload = payload
 
   def __repr__(self) -> str:
-    return "MainTrace({},{})".format(self.level, self.trace_type.__name__)
+    return f"MainTrace({self.level},{self.trace_type.__name__})"
 
   def __hash__(self) -> int:
     return hash((self.level, self.trace_type))
@@ -728,11 +715,10 @@ def trace_state_clean() -> bool:
 
 def reset_trace_state() -> bool:
   "Reset the global trace state and return True if it was already clean."
-  if not trace_state_clean():
-    thread_local_state.trace_state.__init__()  # type: ignore
-    return False
-  else:
+  if trace_state_clean():
     return True
+  thread_local_state.trace_state.__init__()  # type: ignore
+  return False
 
 def cur_sublevel() -> Sublevel:
   return thread_local_state.trace_state.substack[-1]
@@ -783,7 +769,7 @@ def new_base_main(trace_type: Type[Trace]) -> Generator[MainTrace, None, None]:
     t = ref(main)
     del main
     if t() is not None:
-      raise Exception('Leaked trace {}'.format(t()))
+      raise Exception(f'Leaked trace {t()}')
 
 @contextmanager
 def eval_context():
@@ -806,10 +792,7 @@ def new_sublevel() -> Generator[None, None, None]:
       raise Exception(f'Leaked sublevel {t()}.')
 
 def full_lower(val):
-  if isinstance(val, Tracer):
-    return val.full_lower()
-  else:
-    return val
+  return val.full_lower() if isinstance(val, Tracer) else val
 
 def find_top_trace(xs, axis_names=None) -> Trace:
   top_main: Optional[MainTrace] = None
@@ -840,8 +823,8 @@ class AbstractValue:
 
   def __repr__(self):
     try:
-      kv_pairs = ('{}={}'.format(k, v) for k, v in self.__dict__.items())
-      return '{}({})'.format(self.__class__.__name__, ','.join(kv_pairs))
+      kv_pairs = (f'{k}={v}' for k, v in self.__dict__.items())
+      return f"{self.__class__.__name__}({','.join(kv_pairs)})"
     except AttributeError:
       return self.__class__.__name__
 
@@ -909,8 +892,8 @@ def check_valid_jaxtype(x):
 
 def concrete_aval(x):
   for typ in type(x).mro():
-    handler = pytype_aval_mappings.get(typ)
-    if handler: return handler(x)
+    if handler := pytype_aval_mappings.get(typ):
+      return handler(x)
   if hasattr(x, '__jax_array__'):
     return concrete_aval(x.__jax_array__())
   raise TypeError(f"Value {repr(x)} with type {type(x)} is not a valid JAX "
@@ -918,10 +901,7 @@ def concrete_aval(x):
 
 
 def get_aval(x):
-  if isinstance(x, Tracer):
-    return x.aval
-  else:
-    return concrete_aval(x)
+  return x.aval if isinstance(x, Tracer) else concrete_aval(x)
 
 
 pytype_aval_mappings: Dict[type, Callable[[Any], AbstractValue]] = {}
@@ -958,13 +938,12 @@ def concrete_or_error(force: Any, val: Any, context=""):
   """Like force(val), but gives the context in the error message."""
   if force is None:
     force = lambda x: x
-  if isinstance(val, Tracer):
-    if isinstance(val.aval, ConcreteArray):
-      return force(val.aval.val)
-    else:
-      raise ConcretizationTypeError(val, context)
-  else:
+  if not isinstance(val, Tracer):
     return force(val)
+  if isinstance(val.aval, ConcreteArray):
+    return force(val.aval.val)
+  else:
+    raise ConcretizationTypeError(val, context)
 
 convert_element_type_p = Primitive('convert_element_type')
 
@@ -997,8 +976,7 @@ class UnshapedArray(AbstractValue):
     return hash((self.dtype, self.weak_type))
 
   def __repr__(self):
-    return '{}({}{})'.format(self.__class__.__name__, self.str_short(),
-                             ", weak_type=True" if self.weak_type else "")
+    return f'{self.__class__.__name__}({self.str_short()}{", weak_type=True" if self.weak_type else ""})'
 
   _bool = _nonzero = concretization_function_error(bool)
   _float   = concretization_function_error(float, True)
@@ -1012,13 +990,12 @@ class UnshapedArray(AbstractValue):
                          self.weak_type)
 
   def join(self, other):
-    if self.dtype == other.dtype:
-      if self.weak_type == other.weak_type:
-        return self
-      else:
-        return UnshapedArray(self.dtype, weak_type=False)
-    else:
+    if self.dtype != other.dtype:
       raise TypeError(self, other)
+    if self.weak_type == other.weak_type:
+      return self
+    else:
+      return UnshapedArray(self.dtype, weak_type=False)
 
   def str_short(self) -> str:
     return self.dtype.name
@@ -1091,11 +1068,10 @@ class ShapedArray(UnshapedArray):
 
   def str_short(self):
     shapestr = ','.join(map(str, self.shape))
-    if self.named_shape:
-      named_shapestr = ','.join(f'{k}:{v}' for k, v in self.named_shape.items())
-      return f'{self.dtype.name}[{shapestr};{named_shapestr}]'
-    else:
+    if not self.named_shape:
       return f'{self.dtype.name}[{shapestr}]'
+    named_shapestr = ','.join(f'{k}:{v}' for k, v in self.named_shape.items())
+    return f'{self.dtype.name}[{shapestr};{named_shapestr}]'
 
   def strip_named_shape(self):
     return self.update(named_shape={})
@@ -1168,10 +1144,8 @@ class ConcreteArray(ShapedArray):
   _complex         = concretization_function_error(complex, True)
 
 def primal_dtype_to_tangent_dtype(primal_dtype):
-  if not dtypes.issubdtype(primal_dtype, np.inexact):
-    return dtypes.float0
-  else:
-    return primal_dtype
+  return (primal_dtype
+          if dtypes.issubdtype(primal_dtype, np.inexact) else dtypes.float0)
 
 class AbstractToken(AbstractValue):
   def join(self, other):
@@ -1189,8 +1163,8 @@ def raise_to_shaped(aval: AbstractValue, weak_type=None):
   if weak_type is None:
     weak_type = getattr(aval, 'weak_type', False)
   for typ in type(aval).mro():
-    handler = raise_to_shaped_mappings.get(typ)
-    if handler: return handler(aval, weak_type)
+    if handler := raise_to_shaped_mappings.get(typ):
+      return handler(aval, weak_type)
   raise TypeError(type(aval))
 
 raise_to_shaped_mappings : Dict[type, Callable] = {
@@ -1295,8 +1269,7 @@ def _dim_handler_and_canonical(*dlist: DimSize) -> Tuple[DimensionHandler, Tuple
   special_handlers = set()
   canonical = []
   for d in dlist:
-    handler = _SPECIAL_DIMENSION_HANDLERS.get(type(d))
-    if handler:
+    if handler := _SPECIAL_DIMENSION_HANDLERS.get(type(d)):
       special_handlers.add(handler)
       canonical.append(d)
     else:
@@ -1320,7 +1293,7 @@ def symbolic_equal_dim(d1: DimSize, d2: DimSize) -> bool:
 
 def symbolic_equal_one_of_dim(d1: DimSize, dlist: Sequence[DimSize]) -> bool:
   handler, ds = _dim_handler_and_canonical(d1, *dlist)
-  return any([handler.symbolic_equal(ds[0], d) for d in ds[1:]])
+  return any(handler.symbolic_equal(ds[0], d) for d in ds[1:])
 
 def symbolic_equal_shape(s1: Shape, s2: Shape) -> bool:
   return (len(s1) == len(s2) and
@@ -1356,7 +1329,7 @@ def divide_shape_sizes(s1: Shape, s2: Shape) -> DimSize:
   return handler.divide_shape_sizes(ds[:len(s1)], ds[len(s1):])
 
 def same_shape_sizes(s1: Shape, s2: Shape) -> bool:
-  return 1 == divide_shape_sizes(s1, s2)
+  return divide_shape_sizes(s1, s2) == 1
 
 def is_empty_shape(s: Shape) -> bool:
   return any(symbolic_equal_dim(d, 0) for d in s)
@@ -1379,10 +1352,7 @@ def stride_shape(s: Shape, window_size: Shape, window_stride: Shape) -> Shape:
 
 
 def _canonicalize_dimension(dim: DimSize) -> DimSize:
-  if type(dim) in _SPECIAL_DIMENSION_HANDLERS:
-    return dim
-  else:
-    return operator.index(dim)
+  return dim if type(dim) in _SPECIAL_DIMENSION_HANDLERS else operator.index(dim)
 
 def canonicalize_shape(shape: Shape) -> Shape:
   """Canonicalizes and checks for errors in a user-provided shape value.
@@ -1485,9 +1455,7 @@ def join_named_shapes(*named_shapes):
 
 # TODO: Make canonicalize_shape return named shapes?
 def as_named_shape(shape) -> NamedShape:
-  if isinstance(shape, NamedShape):
-    return shape
-  return NamedShape(*shape)
+  return shape if isinstance(shape, NamedShape) else NamedShape(*shape)
 
 
 # ------------------- Call -------------------
@@ -1512,9 +1480,10 @@ def process_env_traces(primitive: Union['CallPrimitive', 'MapPrimitive'],
   todo = []
   assert not out_axes_transforms
   while True:
-    tracers = [x for x in outs if isinstance(x, Tracer)
-               and (level is None or x._trace.level > level)]
-    if tracers:
+    if tracers := [
+        x for x in outs
+        if isinstance(x, Tracer) and (level is None or x._trace.level > level)
+    ]:
       ans = max(tracers, key=lambda x: x._trace.level)
     else:
       break
@@ -1754,9 +1723,7 @@ def subst_axis_names_jaxpr(jaxpr: Union[Jaxpr, ClosedJaxpr], subst: AxisSubst):
   eqns = [subst_axis_names_eqn(eqn, subst, var_map) for eqn in jaxpr.eqns]
   outvars: List[Atom] = [v if isinstance(v, Literal) else var_map[v] for v in jaxpr.outvars]
   new_jaxpr = Jaxpr(constvars, invars, outvars, eqns)
-  if consts is not None:
-    return ClosedJaxpr(new_jaxpr, consts)
-  return new_jaxpr
+  return ClosedJaxpr(new_jaxpr, consts) if consts is not None else new_jaxpr
 
 axis_substitution_rules: Dict[Primitive, Callable[[ParamDict, AxisSubst, bool], ParamDict]] = {}
 
@@ -1835,9 +1802,8 @@ def _check_jaxpr(jaxpr: Jaxpr, in_avals: Sequence[AbstractValue]):
   def read(v: Atom) -> AbstractValue:
     if isinstance(v, Literal):
       return raise_to_shaped(get_aval(v.val))
-    else:
-      typecheck_assert(v in env, f"Variable '{v}' not defined")
-      return env[v]
+    typecheck_assert(v in env, f"Variable '{v}' not defined")
+    return env[v]
 
   def write(v: Var, a: AbstractValue) -> None:
     typecheck_assert(v not in env, f"Variable '{v}' already bound")
@@ -1906,8 +1872,7 @@ def check_call(prim, in_avals, params):
 
   _check_jaxpr(call_jaxpr, in_avals)
 
-  out_avals = [v.aval for v in call_jaxpr.outvars]
-  return out_avals
+  return [v.aval for v in call_jaxpr.outvars]
 
 def check_map(prim, in_avals, params):
   typecheck_assert("call_jaxpr" in params,
@@ -1938,9 +1903,11 @@ def check_map(prim, in_avals, params):
     _check_jaxpr(call_jaxpr, mapped_avals)
 
   mapped_out_avals = [v.aval for v in call_jaxpr.outvars]
-  out_avals = [unmapped_aval(axis_size, out_axis, aval) if out_axis is not None else aval
-               for aval, out_axis in zip(mapped_out_avals, out_axes)]
-  return out_avals
+  return [
+      unmapped_aval(axis_size, out_axis, aval)
+      if out_axis is not None else aval
+      for aval, out_axis in zip(mapped_out_avals, out_axes)
+  ]
 
 
 # ------------------- Jaxpr printed representation -------------------
@@ -1981,10 +1948,9 @@ def pp_eqns(eqns: Sequence[JaxprEqn],
 def pp_jaxpr(jaxpr: Jaxpr, source_info: bool = False) -> PrettyPrint:
   pps = pp_eqns(jaxpr.eqns, source_info=source_info)
   str_outvars = str(tuple(jaxpr.outvars))
-  return (pp('{{ lambda {} ; {}.'.format(pp_vars(jaxpr.constvars),
-                                         pp_vars(jaxpr.invars))) +
-          ((pp('let ') >> vcat(pps))
-           + pp('in {} }}'.format(str_outvars))).indent(2))
+  return pp(
+      f'{{ lambda {pp_vars(jaxpr.constvars)} ; {pp_vars(jaxpr.invars)}.') + (
+          (pp('let ') >> vcat(pps)) + pp(f'in {str_outvars} }}')).indent(2)
 
 def pp_jaxpr_eqn_range(jaxpr: Jaxpr, lo: int, hi: int,
                        source_info: bool = False) -> PrettyPrint:
@@ -2001,10 +1967,9 @@ def pp_jaxpr_eqn_range(jaxpr: Jaxpr, lo: int, hi: int,
     if hi != len(jaxpr.eqns):
       pps.append(pp('...'))
   str_outvars = str(tuple(jaxpr.outvars))
-  return (pp('{{ lambda {} ; {}.'.format(pp_vars(jaxpr.constvars),
-                                         pp_vars(jaxpr.invars))) +
-          ((pp('let ') >> vcat(pps))
-           + pp('in {} }}'.format(str_outvars))).indent(2))
+  return pp(
+      f'{{ lambda {pp_vars(jaxpr.constvars)} ; {pp_vars(jaxpr.invars)}.') + (
+          (pp('let ') >> vcat(pps)) + pp(f'in {str_outvars} }}')).indent(2)
 
 def pp_jaxprs(jaxprs) -> PrettyPrint:
   jaxprs = [j.jaxpr if isinstance(j, ClosedJaxpr) else j for j in jaxprs]

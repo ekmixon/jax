@@ -23,7 +23,10 @@ _cache = None
 def initialize_cache(path):
     """Creates a global cache object. Should only be called once per process."""
     global _cache
-    assert _cache == None, f"The cache path has already been initialized to {_cache}"
+    assert (
+        _cache is None
+    ), f"The cache path has already been initialized to {_cache}"
+
     _cache = FileSystemCache(path)
 
 def get_executable(xla_computation, compile_options) -> Optional[xla_client.Executable]:
@@ -34,13 +37,11 @@ def get_executable(xla_computation, compile_options) -> Optional[xla_client.Exec
     if not xla_executable_serialized:
         return None
     backend = jax.lib.xla_bridge.get_backend()
-    # TODO(skye): xla_computation.get_hlo_module() is the unoptimized HLO but it should
-     #be optimized
-    xla_executable_deserialized = backend.deserialize_executable(
-                                  xla_executable_serialized,
-                                  xla_computation.get_hlo_module(),
-                                  compile_options)
-    return xla_executable_deserialized
+    return backend.deserialize_executable(
+        xla_executable_serialized,
+        xla_computation.get_hlo_module(),
+        compile_options,
+    )
 
 def put_executable(xla_computation, compile_options, executable: xla_client.Executable):
     """Adds 'executable' to the cache, possibly evicting older entries."""

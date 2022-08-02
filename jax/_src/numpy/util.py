@@ -54,16 +54,14 @@ def _parse_numpydoc(docstr: Optional[str]) -> ParsedDoc:
     lambda match: f"{match.groups()[0]}", docstr)
 
   signature, body = "", docstr
-  match = _numpy_signature_re.match(body)
-  if match:
+  if match := _numpy_signature_re.match(body):
     signature = match.group()
     body = docstr[match.end():]
 
   firstline, _, body = body.partition('\n')
   body = textwrap.dedent(body.lstrip('\n'))
 
-  match = _numpy_signature_re.match(body)
-  if match:
+  if match := _numpy_signature_re.match(body):
     signature = match.group()
     body = body[match.end():]
 

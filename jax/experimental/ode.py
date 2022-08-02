@@ -121,10 +121,7 @@ def runge_kutta_step(func, y0, f0, t0, dt):
   return y1, f1, y1_error, k
 
 def abs2(x):
-  if jnp.iscomplexobj(x):
-    return x.real ** 2 + x.imag ** 2
-  else:
-    return x ** 2
+  return x.real ** 2 + x.imag ** 2 if jnp.iscomplexobj(x) else x ** 2
 
 def error_ratio(error_estimate, rtol, atol, y0, y1):
   err_tol = atol + rtol * jnp.maximum(jnp.abs(y0), jnp.abs(y1))

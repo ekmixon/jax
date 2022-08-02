@@ -58,7 +58,7 @@ def _copy_so(src_file, dst_dir, dst_filename=None):
   src_filename = os.path.basename(src_file)
   if not dst_filename:
     if _is_windows() and src_filename.endswith(".so"):
-      dst_filename = src_filename[:-3] + ".pyd"
+      dst_filename = f"{src_filename[:-3]}.pyd"
     else:
       dst_filename = src_filename
   dst_file = os.path.join(dst_dir, dst_filename)
@@ -108,8 +108,7 @@ def patch_copy_xla_extension_stubs(dst_dir):
   with open(os.path.join(xla_extension_dir, "__init__.py"), "w"):
     pass
   for stub_name in _XLA_EXTENSION_STUBS:
-    with open(r.Rlocation(
-        "org_tensorflow/tensorflow/compiler/xla/python/xla_extension/" + stub_name)) as f:
+    with open(r.Rlocation(f"org_tensorflow/tensorflow/compiler/xla/python/xla_extension/{stub_name}")) as f:
       src = f.read()
     src = src.replace(
         "from tensorflow.compiler.xla.python import xla_extension",

@@ -18,9 +18,20 @@ from jax.interpreters import xla
 from jax.lib import xla_client
 from jax.lib import xla_bridge
 
-SUPPORTED_DTYPES = set([jnp.int8, jnp.int16, jnp.int32, jnp.int64,
-                        jnp.uint8, jnp.uint16, jnp.uint32, jnp.uint64,
-                        jnp.float16, jnp.bfloat16, jnp.float32, jnp.float64])
+SUPPORTED_DTYPES = {
+    jnp.int8,
+    jnp.int16,
+    jnp.int32,
+    jnp.int64,
+    jnp.uint8,
+    jnp.uint16,
+    jnp.uint32,
+    jnp.uint64,
+    jnp.float16,
+    jnp.bfloat16,
+    jnp.float32,
+    jnp.float64,
+}
 
 
 def to_dlpack(x: xla.DeviceArrayProtocol, take_ownership: bool = False):
@@ -38,8 +49,7 @@ def to_dlpack(x: xla.DeviceArrayProtocol, take_ownership: bool = False):
       owns.
   """
   if not isinstance(x, xla.DeviceArray):
-    raise TypeError("Argument to to_dlpack must be a DeviceArray, got {}"
-                    .format(type(x)))
+    raise TypeError(f"Argument to to_dlpack must be a DeviceArray, got {type(x)}")
   return xla_client._xla.buffer_to_dlpack_managed_tensor(
       x.device_buffer, take_ownership=take_ownership)
 

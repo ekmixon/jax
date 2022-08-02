@@ -70,10 +70,7 @@ def _zeros_like_pytree(x):
 
 @partial(partial, tree_map)
 def _stop_gradient(x):
-  if isinstance(x, core.Tracer):
-    return stop_gradient_p.bind(x)
-  else:
-    return x
+  return stop_gradient_p.bind(x) if isinstance(x, core.Tracer) else x
 
 
 ### JVPs
@@ -221,7 +218,7 @@ def _add_args(f, extra_args):
 
 @lu.transformation
 def _add_args_(extra_args, *args, **kwargs):
-  extra_args = tuple([arg.val for arg in extra_args])
+  extra_args = tuple(arg.val for arg in extra_args)
   all_args = (extra_args + args)
   yield (yield all_args, kwargs)
 
@@ -258,8 +255,9 @@ def _flatten_jvp(in_tree, *args):
       msg = ("Custom JVP rule must produce primal and tangent outputs with "
              "equal shapes and dtypes, but got:\n{}")
       disagreements = (
-          "  primal {} for tangent {}".format(av1.str_short(), av2.str_short())
-          for av1, av2 in zip(primal_avals_out, tangent_avals_out) if av1 != av2)
+          f"  primal {av1.str_short()} for tangent {av2.str_short()}"
+          for av1, av2 in zip(primal_avals_out, tangent_avals_out)
+          if av1 != av2)
       raise TypeError(msg.format('\n'.join(disagreements)))
   yield primals_out + tangents_out, out_tree
 

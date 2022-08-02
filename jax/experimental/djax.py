@@ -84,24 +84,23 @@ class AbsArray(core.AbstractValue):
       return repr(self)
 
   def __eq__(self, other):
-    if (isinstance(other, AbsArray) and self._eltTy == other._eltTy and
-        len(self.shape) == len(other.shape)):
-      for a, b in zip(self.shape, other.shape):
-        if type(a) is type(b) is int:
-          if a != b: return False
-        elif type(a) is type(b) is BoundedInt:
-          if a is not b: return False
-        elif type(a) is type(b) is Var:
-          if a is not b: return False
-        elif type(a) is type(b) is AbsArray:
-          if a != b: return False
-        elif type(a) is type(b) is DimIndexingExpr:
-          if a.name is not b.name or a.indices != b.indices: return False
-        else:
-          return False
+    if (not isinstance(other, AbsArray) or self._eltTy != other._eltTy
+        or len(self.shape) != len(other.shape)):
+      return False
+    for a, b in zip(self.shape, other.shape):
+      if type(a) is type(b) is int:
+        if a != b: return False
+      elif type(a) is type(b) is BoundedInt:
+        if a is not b: return False
+      elif type(a) is type(b) is Var:
+        if a is not b: return False
+      elif type(a) is type(b) is AbsArray:
+        if a != b: return False
+      elif type(a) is type(b) is DimIndexingExpr:
+        if a.name is not b.name or a.indices != b.indices: return False
       else:
-        return True
-    return False
+        return False
+    return True
 
   # this duck-typing is needed by eg ad.py using dtypes.py
   @property
@@ -288,19 +287,18 @@ def typecheck_atom(env, x):
     raise TypeError(f'atom of unexpected type {x}')
 
 def substitute(subst, aval):
-  if isinstance(aval, AbsArray):
-    new_shape = []
-    for d in aval.shape:
-      if isinstance(d, Var):
-        new_d = subst.get(d, d)
-      elif isinstance(d, DimIndexingExpr):
-        new_d = DimIndexingExpr(subst.get(d.name, d.name), d.indices)
-      else:
-        new_d = d
-      new_shape.append(new_d)
-    return AbsArray(tuple(new_shape), aval._eltTy)
-  else:
+  if not isinstance(aval, AbsArray):
     return aval
+  new_shape = []
+  for d in aval.shape:
+    if isinstance(d, Var):
+      new_d = subst.get(d, d)
+    elif isinstance(d, DimIndexingExpr):
+      new_d = DimIndexingExpr(subst.get(d.name, d.name), d.indices)
+    else:
+      new_d = d
+    new_shape.append(new_d)
+  return AbsArray(tuple(new_shape), aval._eltTy)
 
 typecheck_rules: Dict[core.Primitive, Callable] = {}
 
@@ -311,10 +309,7 @@ def eval_jaxpr(jaxpr, dim_args, args):
   env: Dict[Var, Any] = {}
 
   def read(v):
-    if type(v) is core.Literal:
-      return v.val
-    else:
-      return env[v]
+    return v.val if type(v) is core.Literal else env[v]
 
   def write(v, val):
     env[v] = val
@@ -336,10 +331,12 @@ def eval_jaxpr(jaxpr, dim_args, args):
 
 @curry
 def jaxpr_as_fun(jaxpr, *args):
-  shapevars_to_vals: Dict[Var, Any] = dict(
-      (d, t) for v, x in zip(jaxpr.in_binders, args) if isinstance(v.aval, AbsArray)
-      for d, t in zip(v.aval.shape, x.shape) if isinstance(d, Var)
-      and x is not core.unit)  # TODO partial eval assumes we can plug in units?
+  shapevars_to_vals: Dict[Var, Any] = {
+      d: t
+      for v, x in zip(jaxpr.in_binders, args) if isinstance(v.aval, AbsArray)
+      for d, t in zip(v.aval.shape, x.shape)
+      if isinstance(d, Var) and x is not core.unit
+  }
   dim_args = [shapevars_to_vals[v] for v in jaxpr.in_dim_binders]
   _, out = eval_jaxpr(jaxpr, dim_args, args)
   return out
@@ -426,10 +423,9 @@ class Array:
   def __array__(self):
     if any(isinstance(d, DimIndexer) for d in self.shape):
       raise NotImplementedError  # ragged ndarray
-    else:
-      slices = tuple(slice(d._val) if type(d) is BoundedInt else slice(None)
-                     for d in self.shape)
-      return np.array(self._data[slices])
+    slices = tuple(slice(d._val) if type(d) is BoundedInt else slice(None)
+                   for d in self.shape)
+    return np.array(self._data[slices])
 
 
 # Tracing to embed DJaxprs in Python
@@ -503,8 +499,7 @@ def _extract_out_dim_tracers_from_shapes(main, in_dim_tracers, out_tracers):
 
 class DJaxprTrace(pe.DynamicJaxprTrace):
   def process_primitive(self, primitive, tracers, params):
-    rule = custom_staging_rules.get(primitive)
-    if rule:
+    if rule := custom_staging_rules.get(primitive):
       return rule(self, tracers, params)
     else:
       # If there's no special staging rule, by default do regular Jaxpr staging
@@ -686,10 +681,8 @@ def result_partitioner(in_dim_binders, in_dim_vals, out_dims, out_bufcounts):
   split_sizes = [len(out_dimvars)] + out_bufcounts[:-1]
 
   def dim_handler(v, buf):
-    if not v.aval.shape:
-      return BoundedInt(int(buf.to_py()), v.aval._eltTy._bound)
-    else:
-      return Array(v.aval.shape, v.aval._eltTy, buf.to_py())
+    return (Array(v.aval.shape, v.aval._eltTy, buf.to_py()) if v.aval.shape
+            else BoundedInt(int(buf.to_py()), v.aval._eltTy._bound))
 
   def partitioner(bufs):
     dim_bufs, *grouped_bufs = split_list(bufs, split_sizes)
@@ -697,14 +690,14 @@ def result_partitioner(in_dim_binders, in_dim_vals, out_dims, out_bufcounts):
         zip(in_dim_binders, in_dim_vals),
         zip(out_dimvars, map(dim_handler, out_dimvars, dim_bufs))))
     return dims_dict, grouped_bufs
+
   return partitioner
 
 def result_handler(aval):
   if isinstance(aval, AbsArray):
     return array_result_handler(aval)
-  else:
-    handler = xla.aval_to_result_handler(None, aval)
-    return lambda _, bufs: handler(*bufs)
+  handler = xla.aval_to_result_handler(None, aval)
+  return lambda _, bufs: handler(*bufs)
 
 def array_result_handler(aval):
   if not isinstance(aval._eltTy, BaseType): raise NotImplementedError
@@ -788,8 +781,9 @@ def traceable_to_padded_translation(traceable):
     def fun(*args):
       dim_sizes, args = split_list(args, [len(dims)])
       logical_sizes = dict(zip(dims, dim_sizes))
-      logical_shapes = [tuple([logical_sizes.get(d, d) for d in aval.shape])
-                        for aval in avals]  # TODO more cases
+      logical_shapes = [
+          tuple(logical_sizes.get(d, d) for d in aval.shape) for aval in avals
+      ]
       return traceable(logical_shapes, *args, **params)
 
     in_avals = [*dim_avals, *padded_avals]
@@ -799,24 +793,24 @@ def traceable_to_padded_translation(traceable):
     outs = xla.jaxpr_subcomp(c, jaxpr, None, xla.AxisEnv(1, (), ()),
                              xla._xla_consts(c, consts), '', *operands_)
     return xla._partition_outputs(out_avals, outs)
+
   return translation
 
 def _replace_vars_with_bounds(aval):
   if not isinstance(aval, AbsArray):
     return aval
-  else:
-    new_shape = []
-    for d in aval.shape:
-      if isinstance(d, Var):
-        assert d.aval.shape == () and isinstance(d.aval._eltTy, BoundedIntTy)
-        new_shape.append(d.aval._eltTy._bound)
-      elif isinstance(d, int):
-        new_shape.append(d)
-      elif isinstance(d, BoundedInt):
-        new_shape.append(d._bound)
-      else:
-        raise NotImplementedError(d)
-    return core.ShapedArray(tuple(new_shape), aval._eltTy._dtype)
+  new_shape = []
+  for d in aval.shape:
+    if isinstance(d, Var):
+      assert d.aval.shape == () and isinstance(d.aval._eltTy, BoundedIntTy)
+      new_shape.append(d.aval._eltTy._bound)
+    elif isinstance(d, int):
+      new_shape.append(d)
+    elif isinstance(d, BoundedInt):
+      new_shape.append(d._bound)
+    else:
+      raise NotImplementedError(d)
+  return core.ShapedArray(tuple(new_shape), aval._eltTy._dtype)
 
 # AD
 
@@ -836,10 +830,12 @@ ad.primitive_jvps[dynamic_xla_call_p] = _dynamic_xla_call_jvp
 def _dynamic_xla_call_transpose(cts_in, *args, jaxpr, num_consts):
   # TODO make this a dynamic_xla_call_p bind
   del num_consts
-  vars_to_vals = dict(
-      (d, t) for v, x in zip(jaxpr.in_binders, args)
+  vars_to_vals = {
+      d: t
+      for v, x in zip(jaxpr.in_binders, args)
       if isinstance(v.aval, AbsArray) and not ad.is_undefined_primal(x)
-      for d, t in zip(v.aval.shape, x.shape) if isinstance(d, Var))
+      for d, t in zip(v.aval.shape, x.shape) if isinstance(d, Var)
+  }
   dim_args = [vars_to_vals[v] for v in jaxpr.in_dim_binders]
   consts_bar, args_bar = backward_pass(jaxpr, dim_args, args, cts_in)  # type: ignore
   return [*consts_bar, *args_bar]
@@ -874,7 +870,7 @@ def backward_pass(jaxpr, dim_args, args, cts_in):
 
 def jvp_jaxpr(jaxpr):
   f = lu.wrap_init(jaxpr_as_fun(jaxpr))
-  dimvars = dict((v, v.aval) for v in jaxpr.in_dim_binders)
+  dimvars = {v: v.aval for v in jaxpr.in_dim_binders}
   in_avals = [_replace_vars_with_avals(dimvars, v.aval) for v in jaxpr.in_binders]
   jaxpr, consts, _ = trace_to_jaxpr_dynamic(jvp_traceable(ad.jvp(f)), in_avals * 2)
   return jaxpr, consts
@@ -985,7 +981,7 @@ def _dynamic_xla_call_vmap(args, in_dims, *, jaxpr, num_consts):
 batching.primitive_batchers[dynamic_xla_call_p] = _dynamic_xla_call_vmap
 
 def batch_jaxpr(jaxpr, axis_size, in_dims):
-  dimvars = dict((v, v.aval) for v in jaxpr.in_dim_binders)
+  dimvars = {v: v.aval for v in jaxpr.in_dim_binders}
   in_avals = [_replace_vars_with_avals(dimvars, v.aval) for v in jaxpr.in_binders]
 
   in_avals = [core.unmapped_aval(axis_size, d, aval)
@@ -1077,16 +1073,14 @@ reduce_sum_p = core.Primitive('reduce_sum')
 
 @reduce_sum_p.def_abstract_eval
 def _sum_abstract_eval(operand, *, axes):
-  if isinstance(operand, AbsArray):
-    axes = set(axes)
-    new_shape = [d for i, d in enumerate(operand.shape) if i not in axes]
-    if (all(isinstance(d, int) for d in new_shape) and
-        isinstance(operand._eltTy, BaseType)):
-      return core.ShapedArray(tuple(new_shape), operand._eltTy._dtype)
-    else:
-      return AbsArray(tuple(new_shape), operand._eltTy)
-  else:
+  if not isinstance(operand, AbsArray):
     return lax.reduce_sum_p.reduce_sum_abstract_eval(operand, axes=axes)
+  axes = set(axes)
+  new_shape = [d for i, d in enumerate(operand.shape) if i not in axes]
+  return (core.ShapedArray(tuple(new_shape), operand._eltTy._dtype) if
+          (all(isinstance(d, int)
+               for d in new_shape) and isinstance(operand._eltTy, BaseType))
+          else AbsArray(tuple(new_shape), operand._eltTy))
 
 def _reduce_sum_typecheck_rule(x, *, axes):
   return [reduce_sum_p.abstract_eval(x.aval, axes=axes)]
@@ -1101,9 +1095,10 @@ translations[reduce_sum_p] = traceable_to_padded_translation(
 
 def _replace_masked_values(logical_shape, x, val, axes=None):
   axes = axes or set(range(len(logical_shape)))
-  masks = [lax.broadcasted_iota(np.int32, x.shape, i) < d
-           for i, d in enumerate(logical_shape) if d is not None and i in axes]
-  if masks:
+  if masks := [
+      lax.broadcasted_iota(np.int32, x.shape, i) < d
+      for i, d in enumerate(logical_shape) if d is not None and i in axes
+  ]:
     x = lax.select(reduce(op.and_, masks), x, lax.full_like(x, val))
   return x
 
@@ -1120,16 +1115,15 @@ lt_p = core.Primitive('lt')
 
 @lt_p.def_abstract_eval
 def _lt_abstract_eval(x, y):
-  if isinstance(x, AbsArray) or isinstance(y, AbsArray):
-    # TODO check dtypes match
-    if not x.shape:
-      return AbsArray(y.shape, BaseType(np.dtype('bool')))
-    if not y.shape:
-      return AbsArray(x.shape, BaseType(np.dtype('bool')))
-    map(_dims_must_equal, x.shape, y.shape)
-    return AbsArray(x.shape, BaseType(np.dtype('bool')))
-  else:
+  if not isinstance(x, AbsArray) and not isinstance(y, AbsArray):
     return lax.lt_p.abstract_eval(x, y)
+  # TODO check dtypes match
+  if not x.shape:
+    return AbsArray(y.shape, BaseType(np.dtype('bool')))
+  if not y.shape:
+    return AbsArray(x.shape, BaseType(np.dtype('bool')))
+  map(_dims_must_equal, x.shape, y.shape)
+  return AbsArray(x.shape, BaseType(np.dtype('bool')))
 
 def _lt_typecheck_rule(x, y):
   return [lt_p.abstract_eval(x.aval, y.aval)]
@@ -1183,11 +1177,10 @@ add_p = core.Primitive('add')
 
 @add_p.def_abstract_eval
 def _add_abstract_eval(x, y):
-  if isinstance(x, AbsArray) and isinstance(y, AbsArray):
-    map(_dims_must_equal, x.shape, y.shape)  # TODO broadcasting?
-    return AbsArray(x.shape, x._eltTy)
-  else:
+  if not isinstance(x, AbsArray) or not isinstance(y, AbsArray):
     return lax.add_p.abstract_eval(x, y)
+  map(_dims_must_equal, x.shape, y.shape)  # TODO broadcasting?
+  return AbsArray(x.shape, x._eltTy)
 
 def _dims_must_equal(d1, d2):
   if isinstance(d1, (Tracer, Var)) and isinstance(d2, (Tracer, Var)):
@@ -1214,11 +1207,10 @@ mul_p = core.Primitive('mul')
 
 @mul_p.def_abstract_eval
 def _mul_abstract_eval(x, y):
-  if isinstance(x, AbsArray) and isinstance(y, AbsArray):
-    map(_dims_must_equal, x.shape, y.shape)  # TODO broadcasting?
-    return AbsArray(x.shape, x._eltTy)
-  else:
+  if not isinstance(x, AbsArray) or not isinstance(y, AbsArray):
     return lax.mul_p.abstract_eval(x, y)
+  map(_dims_must_equal, x.shape, y.shape)  # TODO broadcasting?
+  return AbsArray(x.shape, x._eltTy)
 
 def _mul_typecheck_rule(x, y):
   return [mul_p.abstract_eval(x.aval, y.aval)]
@@ -1338,10 +1330,9 @@ def _iota_typecheck_rule(*invars, size=None):
     invar, = invars
     if not invar.aval.shape:
       return [AbsArray((invar,), BaseType(np.dtype('int32')))]
-    else:
-      indices = tuple(range(len(invar.aval.shape)))
-      return [AbsArray((*invar.aval.shape, DimIndexingExpr(invar, indices)),
-                         BaseType(np.dtype('int32')))]
+    indices = tuple(range(len(invar.aval.shape)))
+    return [AbsArray((*invar.aval.shape, DimIndexingExpr(invar, indices)),
+                       BaseType(np.dtype('int32')))]
 typecheck_rules[iota_p] = _iota_typecheck_rule
 
 def _iota_translation_rule(c, dims, avals, operands, *, size=None):
@@ -1368,15 +1359,14 @@ def _broadcast_staging_rule(trace, tracers, params):
   d_const = trace.get_const(d)
   if d_const is not None:
     raise NotImplementedError  # TODO
-  else:
-    aval = x.aval
-    dtype = aval._eltTy._dtype if isinstance(aval, AbsArray) else aval.dtype
-    out_aval = AbsArray((d, *x.shape), BaseType(dtype))
-    out_tracer = pe.DynamicJaxprTracer(trace, out_aval, None)
-    eqn = pe.new_jaxpr_eqn([trace.getvar(x), trace.getvar(d)],
-                           [trace.makevar(out_tracer)], broadcast_p, {}, None)
-    trace.frame.eqns.append(eqn)
-    return out_tracer
+  aval = x.aval
+  dtype = aval._eltTy._dtype if isinstance(aval, AbsArray) else aval.dtype
+  out_aval = AbsArray((d, *x.shape), BaseType(dtype))
+  out_tracer = pe.DynamicJaxprTracer(trace, out_aval, None)
+  eqn = pe.new_jaxpr_eqn([trace.getvar(x), trace.getvar(d)],
+                         [trace.makevar(out_tracer)], broadcast_p, {}, None)
+  trace.frame.eqns.append(eqn)
+  return out_tracer
 custom_staging_rules[broadcast_p] = _broadcast_staging_rule
 
 def _broadcast_typecheck_rule(x, d):

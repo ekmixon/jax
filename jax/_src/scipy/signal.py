@@ -45,17 +45,17 @@ def _convolve_nd(in1, in2, mode, *, precision):
   if swap:
     in1, in2 = in2, in1
   shape = in2.shape
-  in2 = in2[tuple(slice(None, None, -1) for s in shape)]
+  in2 = in2[tuple(slice(None, None, -1) for _ in shape)]
 
-  if mode == 'valid':
-    padding = [(0, 0) for s in shape]
+  if mode == 'full':
+    padding = [(s - 1, s - 1) for s in shape]
+
   elif mode == 'same':
     padding = [(s - 1 - (s_o - 1) // 2, s - s_o + (s_o - 1) // 2)
                for (s, s_o) in zip(shape, shape_o)]
-  elif mode == 'full':
-    padding = [(s - 1, s - 1) for s in shape]
-
-  strides = tuple(1 for s in shape)
+  elif mode == 'valid':
+    padding = [(0, 0) for _ in shape]
+  strides = tuple(1 for _ in shape)
   result = lax.conv_general_dilated(in1[None, None], in2[None, None], strides,
                                     padding, precision=precision)
   return result[0, 0]
@@ -98,24 +98,16 @@ def correlate2d(in1, in2, mode='full', boundary='fill', fillvalue=0,
   swap = all(s1 <= s2 for s1, s2 in zip(in1.shape, in2.shape))
   same_shape =  all(s1 == s2 for s1, s2 in zip(in1.shape, in2.shape))
 
-  if mode == "same":
+  if mode != "same" and mode == "valid" and swap and not same_shape:
+    in1, in2 = in2[::-1, ::-1], in1.conj()
+    return _convolve_nd(in1, in2, mode, precision=precision)
+  elif (mode != "same" and mode == "valid" or mode != "same" and not swap
+        or mode == "same"):
     in1, in2 = in1[::-1, ::-1], in2.conj()
-    result = _convolve_nd(in1, in2, mode, precision=precision)[::-1, ::-1]
-  elif mode == "valid":
-    if swap and not same_shape:
-      in1, in2 = in2[::-1, ::-1], in1.conj()
-      result = _convolve_nd(in1, in2, mode, precision=precision)
-    else:
-      in1, in2 = in1[::-1, ::-1], in2.conj()
-      result = _convolve_nd(in1, in2, mode, precision=precision)[::-1, ::-1]
+    return _convolve_nd(in1, in2, mode, precision=precision)[::-1, ::-1]
   else:
-    if swap:
-      in1, in2 = in2[::-1, ::-1], in1.conj()
-      result = _convolve_nd(in1, in2, mode, precision=precision).conj()
-    else:
-      in1, in2 = in1[::-1, ::-1], in2.conj()
-      result = _convolve_nd(in1, in2, mode, precision=precision)[::-1, ::-1]
-  return result
+    in1, in2 = in2[::-1, ::-1], in1.conj()
+    return _convolve_nd(in1, in2, mode, precision=precision).conj()
 
 
 @_wraps(osp_signal.detrend)
@@ -127,22 +119,21 @@ def detrend(data, axis=-1, type='linear', bp=0, overwrite_data=None):
   data, = _promote_dtypes_inexact(jnp.asarray(data))
   if type == 'constant':
     return data - data.mean(axis, keepdims=True)
-  else:
-    N = data.shape[axis]
-    # bp is static, so we use np operations to avoid pushing to device.
-    bp = np.sort(np.unique(np.r_[0, bp, N]))
-    if bp[0] < 0 or bp[-1] > N:
-      raise ValueError("Breakpoints must be non-negative and less than length of data along given axis.")
-    data = jnp.moveaxis(data, axis, 0)
-    shape = data.shape
-    data = data.reshape(N, -1)
-    for m in range(len(bp) - 1):
-      Npts = bp[m + 1] - bp[m]
-      A = jnp.vstack([
-        jnp.ones(Npts, dtype=data.dtype),
-        jnp.arange(1, Npts + 1, dtype=data.dtype) / Npts
-      ]).T
-      sl = slice(bp[m], bp[m + 1])
-      coef, *_ = linalg.lstsq(A, data[sl])
-      data = data.at[sl].add(-jnp.matmul(A, coef, precision=lax.Precision.HIGHEST))
-    return jnp.moveaxis(data.reshape(shape), 0, axis)
+  N = data.shape[axis]
+  # bp is static, so we use np operations to avoid pushing to device.
+  bp = np.sort(np.unique(np.r_[0, bp, N]))
+  if bp[0] < 0 or bp[-1] > N:
+    raise ValueError("Breakpoints must be non-negative and less than length of data along given axis.")
+  data = jnp.moveaxis(data, axis, 0)
+  shape = data.shape
+  data = data.reshape(N, -1)
+  for m in range(len(bp) - 1):
+    Npts = bp[m + 1] - bp[m]
+    A = jnp.vstack([
+      jnp.ones(Npts, dtype=data.dtype),
+      jnp.arange(1, Npts + 1, dtype=data.dtype) / Npts
+    ]).T
+    sl = slice(bp[m], bp[m + 1])
+    coef, *_ = linalg.lstsq(A, data[sl])
+    data = data.at[sl].add(-jnp.matmul(A, coef, precision=lax.Precision.HIGHEST))
+  return jnp.moveaxis(data.reshape(shape), 0, axis)

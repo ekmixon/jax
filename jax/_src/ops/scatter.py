@@ -380,36 +380,45 @@ def _segment_update(name: str,
                     unique_indices: bool = False,
                     bucket_size: Optional[int] = None,
                     reducer: Optional[Callable] = None) -> Array:
-  jnp._check_arraylike(name, data, segment_ids)
-  data = jnp.asarray(data)
-  segment_ids = jnp.asarray(segment_ids)
-  dtype = data.dtype
-  if num_segments is None:
-    num_segments = jnp.max(segment_ids) + 1
-  num_segments = core.concrete_or_error(int, num_segments, "segment_sum() `num_segments` argument.")
-  if num_segments is not None and num_segments < 0:
-    raise ValueError("num_segments must be non-negative.")
+    jnp._check_arraylike(name, data, segment_ids)
+    data = jnp.asarray(data)
+    segment_ids = jnp.asarray(segment_ids)
+    dtype = data.dtype
+    if num_segments is None:
+      num_segments = jnp.max(segment_ids) + 1
+    num_segments = core.concrete_or_error(int, num_segments, "segment_sum() `num_segments` argument.")
+    if num_segments is not None and num_segments < 0:
+      raise ValueError("num_segments must be non-negative.")
 
-  out = jnp.full((num_segments,) + data.shape[1:], _get_identity(scatter_op, dtype), dtype=dtype)
+    out = jnp.full((num_segments,) + data.shape[1:], _get_identity(scatter_op, dtype), dtype=dtype)
 
-  num_buckets = 1 if bucket_size is None \
-                  else util.ceil_of_ratio(segment_ids.size, bucket_size)
-  if num_buckets == 1:
-    return _scatter_update(
-      out, segment_ids, data, scatter_op, indices_are_sorted,
-      unique_indices, normalize_indices=False)
+    num_buckets = 1 if bucket_size is None \
+                    else util.ceil_of_ratio(segment_ids.size, bucket_size)
+    if num_buckets == 1:
+      return _scatter_update(
+        out, segment_ids, data, scatter_op, indices_are_sorted,
+        unique_indices, normalize_indices=False)
 
-  # Bucketize indices and perform segment_update on each bucket to improve
-  # numerical stability for operations like product and sum.
-  assert reducer is not None
-  outs = []
-  for sub_data, sub_segment_ids in zip(
-      jnp.array_split(data, num_buckets),
-      jnp.array_split(segment_ids, num_buckets)):
-    outs.append(
-        _segment_update(name, sub_data, sub_segment_ids, scatter_op, num_segments,
-                        indices_are_sorted, unique_indices))
-  return reducer(jnp.stack(outs), axis=0).astype(dtype)
+    # Bucketize indices and perform segment_update on each bucket to improve
+    # numerical stability for operations like product and sum.
+    assert reducer is not None
+    outs = [
+        _segment_update(
+            name,
+            sub_data,
+            sub_segment_ids,
+            scatter_op,
+            num_segments,
+            indices_are_sorted,
+            unique_indices,
+        )
+        for sub_data, sub_segment_ids in zip(
+            jnp.array_split(data, num_buckets),
+            jnp.array_split(segment_ids, num_buckets),
+        )
+    ]
+
+    return reducer(jnp.stack(outs), axis=0).astype(dtype)
 
 
 def segment_sum(data: Array,

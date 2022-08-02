@@ -39,8 +39,7 @@ def _roots_no_zeros(p):
   # build companion matrix and find its eigenvalues (the roots)
   A = jnp.diag(jnp.ones((p.size - 2,), p.dtype), -1)
   A = jaxops.index_update(A, jaxops.index[0, :], -p[1:] / p[0])
-  roots = _eigvals(A)
-  return roots
+  return _eigvals(A)
 
 
 @jit
@@ -80,11 +79,7 @@ def roots(p, *, strip_zeros=True):
 
   # strip_zeros=False is unsafe because leading zeros aren't removed
   if not strip_zeros:
-    if p.size > 1:
-      return _roots_no_zeros(p)
-    else:
-      return jnp.array([])
-
+    return _roots_no_zeros(p) if p.size > 1 else jnp.array([])
   if jnp.all(p == 0):
     return jnp.array([])
 
@@ -98,8 +93,7 @@ def roots(p, *, strip_zeros=True):
 
   if p.size < 2:
     return jnp.zeros(trailing_zeros, p.dtype)
-  else:
-    roots = _roots_no_zeros(p)
-    # combine roots and zero roots
-    roots = jnp.hstack((roots, jnp.zeros(trailing_zeros, p.dtype)))
-    return roots
+  roots = _roots_no_zeros(p)
+  # combine roots and zero roots
+  roots = jnp.hstack((roots, jnp.zeros(trailing_zeros, p.dtype)))
+  return roots

@@ -137,9 +137,8 @@ def logsumexp(a, axis=None, b=None, keepdims=False, return_sign=False):
       out = lax.add(lax.log(lax.abs(sumexp)), amax)
   if return_sign:
     return (out, sign)
-  if b is not None:
-    if not np.issubdtype(out.dtype, np.complexfloating):
-      out = jnp.where(sign < 0, np.nan, out)
+  if b is not None and not np.issubdtype(out.dtype, np.complexfloating):
+    out = jnp.where(sign < 0, np.nan, out)
   return out
 
 
@@ -351,8 +350,8 @@ def ndtr(x):
   dtype = lax.dtype(x)
   if dtype not in (jnp.float32, jnp.float64):
     raise TypeError(
-        "x.dtype={} is not supported, see docstring for supported types."
-        .format(dtype))
+        f"x.dtype={dtype} is not supported, see docstring for supported types."
+    )
   return _ndtr(x)
 
 
@@ -391,8 +390,8 @@ def ndtri(p):
   dtype = lax.dtype(p)
   if dtype not in (jnp.float32, jnp.float64):
     raise TypeError(
-        "x.dtype={} is not supported, see docstring for supported types."
-        .format(dtype))
+        f"x.dtype={dtype} is not supported, see docstring for supported types."
+    )
   return _ndtri(p)
 
 
@@ -459,10 +458,8 @@ def _ndtri(p):
   def _create_polynomial(var, coeffs):
     """Compute n_th order polynomial via Horner's method."""
     coeffs = np.array(coeffs, dtype)
-    if not coeffs.size:
-      return jnp.zeros_like(var)
-    return coeffs[0] + _create_polynomial(var, coeffs[1:]) * var
-
+    return (coeffs[0] + _create_polynomial(var, coeffs[1:]) * var
+            if coeffs.size else jnp.zeros_like(var))
 
   maybe_complement_p = jnp.where(p > dtype(-np.expm1(-2.)), dtype(1.) - p, p)
   # Write in an arbitrary value in place of 0 for p since 0 will cause NaNs
@@ -583,7 +580,7 @@ def log_ndtr(x, series_order=3):
     lower_segment = _LOGNDTR_FLOAT32_LOWER
     upper_segment = _LOGNDTR_FLOAT32_UPPER
   else:
-    raise TypeError("x.dtype={} is not supported.".format(np.dtype(dtype)))
+    raise TypeError(f"x.dtype={np.dtype(dtype)} is not supported.")
 
   # The basic idea here was ported from:
   #   https://root.cern.ch/doc/v608/SpecFuncCephesInv_8cxx_source.html
@@ -751,24 +748,22 @@ def _gen_derivatives(p: jnp.ndarray,
   # p_{l-1}^{m-2}.
   p_mm2_lm1 = jnp.pad(p_m_lm1, ((2, 0), (0, 0), (0, 0)))[:num_m, :, :]
 
-  # Derivative computation requires negative orders.
   if is_normalized:
     raise NotImplementedError(
         'Negative orders for normalization is not implemented yet.')
-  else:
-    if num_l > 1:
-      l_vec = jnp.arange(1, num_l - 1)
-      p_p1 = p[1, 1:num_l - 1, :]
-      coeff = -1.0 / ((l_vec + 1) * l_vec)
-      update_p_p1 = jnp.einsum('i,ij->ij', coeff, p_p1)
-      p_mm2_lm1 = p_mm2_lm1.at[ops.index[1, 2:num_l, :]].set(update_p_p1)
+  if num_l > 1:
+    l_vec = jnp.arange(1, num_l - 1)
+    p_p1 = p[1, 1:num_l - 1, :]
+    coeff = -1.0 / ((l_vec + 1) * l_vec)
+    update_p_p1 = jnp.einsum('i,ij->ij', coeff, p_p1)
+    p_mm2_lm1 = p_mm2_lm1.at[ops.index[1, 2:num_l, :]].set(update_p_p1)
 
-    if num_l > 2:
-      l_vec = jnp.arange(2, num_l - 1)
-      p_p2 = p[2, 2:num_l - 1, :]
-      coeff = 1.0 / ((l_vec + 2) * (l_vec + 1) * l_vec)
-      update_p_p2 = jnp.einsum('i,ij->ij', coeff, p_p2)
-      p_mm2_lm1 = p_mm2_lm1.at[ops.index[0, 3:num_l, :]].set(update_p_p2)
+  if num_l > 2:
+    l_vec = jnp.arange(2, num_l - 1)
+    p_p2 = p[2, 2:num_l - 1, :]
+    coeff = 1.0 / ((l_vec + 2) * (l_vec + 1) * l_vec)
+    update_p_p2 = jnp.einsum('i,ij->ij', coeff, p_p2)
+    p_mm2_lm1 = p_mm2_lm1.at[ops.index[0, 3:num_l, :]].set(update_p_p2)
 
   m_mat, l_mat = jnp.mgrid[:num_m, :num_l]
 
@@ -939,8 +934,8 @@ def lpmn(m: int, n: int, z: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
   dtype = lax.dtype(z)
   if dtype not in (jnp.float32, jnp.float64):
     raise TypeError(
-        'z.dtype={} is not supported, see docstring for supported types.'
-        .format(dtype))
+        f'z.dtype={dtype} is not supported, see docstring for supported types.'
+    )
 
   if z.ndim != 1:
     raise ValueError('z must be a 1D array.')
@@ -996,8 +991,8 @@ def lpmn_values(m: int, n: int, z: jnp.ndarray, is_normalized: bool) -> jnp.ndar
   dtype = lax.dtype(z)
   if dtype not in (jnp.float32, jnp.float64):
     raise TypeError(
-        'z.dtype={} is not supported, see docstring for supported types.'
-        .format(dtype))
+        f'z.dtype={dtype} is not supported, see docstring for supported types.'
+    )
 
   if z.ndim != 1:
     raise ValueError('z must be a 1D array.')

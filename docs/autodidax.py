@@ -354,10 +354,7 @@ def find_top_trace(xs) -> Trace:
 
 # +
 def full_lower(val: Any):
-  if isinstance(val, Tracer):
-    return val.full_lower()
-  else:
-    return val
+  return val.full_lower() if isinstance(val, Tracer) else val
 
 def full_raise(trace: Trace, val: Any) -> Tracer:
   if not isinstance(val, Tracer):
@@ -398,9 +395,8 @@ class EvalTrace(Trace):
 trace_stack.append(MainTrace(0, EvalTrace, None))  # special bottom of the stack
 
 # NB: in JAX, instead of a dict we attach impl rules to the Primitive instance
-impl_rules = {}
+impl_rules = {add_p: lambda x, y: [np.add(x, y)]}
 
-impl_rules[add_p] = lambda x, y: [np.add(x, y)]
 impl_rules[mul_p] = lambda x, y: [np.multiply(x, y)]
 impl_rules[neg_p] = lambda x: [np.negative(x)]
 impl_rules[sin_p] = lambda x: [np.sin(x)]
@@ -422,8 +418,7 @@ impl_rules[broadcast_p] = broadcast_impl
 # +
 def f(x):
   y = sin(x) * 2.
-  z = - y + x
-  return z
+  return - y + x
 
 print(f(3.0))
 # -
@@ -556,8 +551,7 @@ print(cos(3.0))
 # +
 def f(x):
   y = sin(x) * 2.
-  z = - y + x
-  return z
+  return - y + x
 
 x, xdot = 3., 1.
 y, ydot = jvp_v1(f, (x,), (xdot,))
@@ -575,10 +569,7 @@ print(deriv(deriv(deriv(deriv(sin))))(3.))
 
 # +
 def f(x):
-  if x > 0.:  # Python control flow
-    return 2. * x
-  else:
-    return x
+  return 2. * x if x > 0. else x
 
 print(deriv(f)(3.))
 print(deriv(f)(-3.))
@@ -691,14 +682,12 @@ def tree_flatten(x: Any) -> Tuple[List[Any], PyTreeDef]:
   return list(children_iter), treedef
 
 def _tree_flatten(x: Any) -> Tuple[Iterable, PyTreeDef]:
-  node_type = node_types.get(type(x))
-  if node_type:
-    node_metadata, children = node_type.to_iterable(x)
-    children_flat, child_trees = unzip2(map(_tree_flatten, children))
-    flattened = it.chain.from_iterable(children_flat)
-    return flattened, PyTreeDef(node_type, node_metadata, tuple(child_trees))
-  else:
+  if not (node_type := node_types.get(type(x))):
     return [x], leaf
+  node_metadata, children = node_type.to_iterable(x)
+  children_flat, child_trees = unzip2(map(_tree_flatten, children))
+  flattened = it.chain.from_iterable(children_flat)
+  return flattened, PyTreeDef(node_type, node_metadata, tuple(child_trees))
 
 def tree_unflatten(treedef: PyTreeDef, xs: List[Any]) -> Any:
   return _tree_unflatten(treedef, iter(xs))
@@ -706,9 +695,8 @@ def tree_unflatten(treedef: PyTreeDef, xs: List[Any]) -> Any:
 def _tree_unflatten(treedef: PyTreeDef, xs: Iterator) -> Any:
   if treedef is leaf:
     return next(xs)
-  else:
-    children = (_tree_unflatten(t, xs) for t in treedef.child_treedefs)
-    return treedef.node_type.from_iterable(treedef.node_metadata, children)
+  children = (_tree_unflatten(t, xs) for t in treedef.child_treedefs)
+  return treedef.node_type.from_iterable(treedef.node_metadata, children)
 # -
 
 # With this pytree-handling `jvp` implementation, we can now handle arbitrary
@@ -780,10 +768,7 @@ class BatchTracer(Tracer):
       return mapped_aval(self.batch_dim, get_aval(self.val))
 
   def full_lower(self):
-    if self.batch_dim is not_mapped:
-      return full_lower(self.val)
-    else:
-      return self
+    return full_lower(self.val) if self.batch_dim is not_mapped else self
 
 class BatchTrace(Trace):
   pure = lift = lambda self, val: BatchTracer(self, val, not_mapped)
@@ -856,9 +841,10 @@ def vmap_flat(f, in_axes, *args):
     outs = f(*tracers_in)
     tracers_out = [full_raise(trace, out) for out in outs]
     vals_out, bdims_out = unzip2((t.val, t.batch_dim) for t in tracers_out)
-  outs_transposed = [move_batch_axis(axis_size, bdim, 0, val_out)
-                     for val_out, bdim in zip(vals_out, bdims_out)]
-  return outs_transposed
+  return [
+      move_batch_axis(axis_size, bdim, 0, val_out)
+      for val_out, bdim in zip(vals_out, bdims_out)
+  ]
 
 def vmap(f, in_axes):
   def batched_f(*args):
@@ -1012,7 +998,7 @@ def typecheck_jaxpr(jaxpr: Jaxpr) -> JaxprType:
     in_types = [typecheck_atom(env, x) for x in eqn.inputs]
     out_types = abstract_eval_rules[eqn.primitive](*in_types, **eqn.params)
     for out_binder, out_type in zip(eqn.out_binders, out_types):
-      if not out_type == out_binder.aval: raise TypeError
+      if out_type != out_binder.aval: raise TypeError
     for out_binder in eqn.out_binders:
       if out_binder in env: raise TypeError
       env.add(out_binder)
@@ -1310,8 +1296,7 @@ def pp_eqn(names: Dict[Var, str], eqn: JaxprEqn) -> PPrint:
   return lhs >> pp(' = ') >> rhs
 
 def pp_params(params: Dict[str, Any]) -> PPrint:
-  items = sorted(params.items())
-  if items:
+  if items := sorted(params.items()):
     return pp(' [ ') >> vcat([pp(f'{k}={v}') for k, v in items]) >> pp(' ] ')
   else:
     return pp(' ')
@@ -1611,8 +1596,7 @@ print(f(np.array([1., 2., 3.])))
 # +
 def f(x):
   y = sin(x) * 2.
-  z = - y + x
-  return z
+  return - y + x
 
 def deriv(f):
   return lambda x: jvp(f, (x,), (1.,))[1]
@@ -1678,16 +1662,15 @@ def unmapped_aval(axis_size: int, batch_dim: BatchAxis, aval: ShapedArray
                   ) -> ShapedArray:
   if batch_dim is not_mapped:
     return aval
-  else:
-    shape = list(aval.shape)
-    shape.insert(batch_dim, axis_size)
-    return ShapedArray(tuple(shape), aval.dtype)
+  shape = list(aval.shape)
+  shape.insert(batch_dim, axis_size)
+  return ShapedArray(tuple(shape), aval.dtype)
 
 # +
 def xla_call_abstract_eval_rule(*in_types, jaxpr, num_consts):
   del num_consts  # Unused.
   jaxpr_type = typecheck_jaxpr(jaxpr)
-  if not all(t1 == t2 for t1, t2 in zip(jaxpr_type.in_types, in_types)):
+  if any(t1 != t2 for t1, t2 in zip(jaxpr_type.in_types, in_types)):
     raise TypeError
   return jaxpr_type.out_types
 abstract_eval_rules[xla_call_p] = xla_call_abstract_eval_rule
@@ -1711,8 +1694,7 @@ def destructure_tuple(c, tup):
 def f(x):
   print('tracing!')
   y = sin(x) * 2.
-  z = - y + x
-  return z
+  return - y + x
 
 x, xdot = 3., 1.
 y, ydot = jvp(f, (x,), (xdot,))
@@ -1767,8 +1749,7 @@ jax_types.add(DeviceArray)
 @jit
 def f(x):
   y = sin(x) * 2.
-  z = - y + x
-  return z
+  return - y + x
 
 x, xdot = 3., 1.
 y, ydot = jvp(f, (x,), (xdot,))
@@ -2026,9 +2007,7 @@ class PartialEvalTracer(Tracer):
     return self.pval.aval
 
   def full_lower(self):
-    if self.pval.is_known:
-      return full_lower(self.pval.const)
-    return self
+    return full_lower(self.pval.const) if self.pval.is_known else self
 
 # The `PartialEvalTrace` contains the logic for constructing the graph of
 # `JaxprRecipe`s and `PartialEvalTracer`s. Each argument corresponds to a
@@ -2061,15 +2040,14 @@ class PartialEvalTrace(Trace):
   def instantiate_const(self, tracer: PartialEvalTracer) -> PartialEvalTracer:
     if tracer.pval.is_unknown:
       return tracer
-    else:
-      pval = PartialVal.unknown(raise_to_shaped(tracer.aval))
-      return PartialEvalTracer(self, pval, ConstRecipe(tracer.pval.const))
+    pval = PartialVal.unknown(raise_to_shaped(tracer.aval))
+    return PartialEvalTracer(self, pval, ConstRecipe(tracer.pval.const))
 
   def process_primitive(self, primitive, tracers, params):
     if all(t.pval.is_known for t in tracers):
       return bind(primitive, *map(full_lower, tracers), **params)
-    rule = partial_eval_rules.get(primitive)
-    if rule: return rule(self, tracers, **params)
+    if rule := partial_eval_rules.get(primitive):
+      return rule(self, tracers, **params)
     tracers_in = [self.instantiate_const(t) for t in tracers]
     avals_in = [t.aval for t in tracers_in]
     avals_out = abstract_eval_rules[primitive](*avals_in, **params)
@@ -2298,8 +2276,7 @@ partial_eval_jaxpr_rules[xla_call_p] = xla_call_peval_eqn
 @jit
 def f(x):
   y = sin(x) * 2.
-  z = - y + x
-  return z
+  return - y + x
 
 y, f_lin = linearize(f, 3.)
 y_dot = f_lin(1.)
@@ -2309,8 +2286,7 @@ print(y, y_dot)
 @jit
 def f(x):
   y = sin(x) * 2.
-  z = g(x, y)
-  return z
+  return g(x, y)
 
 @jit
 def g(x, y):
@@ -2485,8 +2461,7 @@ print(f_vjp(1.), cos(3.))
 # +
 def f(x):
   y = sin(x) * 2.
-  z = - y + x
-  return z
+  return - y + x
 
 print(grad(f)(3.))
 
@@ -2494,8 +2469,7 @@ print(grad(f)(3.))
 @jit
 def f(x):
   y = x * 2.
-  z = g(y)
-  return z
+  return g(y)
 
 @jit
 def g(x):
@@ -2701,7 +2675,7 @@ def cond_abstract_eval(pred_type, *in_types, true_jaxpr, false_jaxpr):
   jaxpr_type = typecheck_jaxpr(true_jaxpr)
   if jaxpr_type != typecheck_jaxpr(false_jaxpr):
     raise TypeError
-  if not all(t1 == t2 for t1, t2 in zip(jaxpr_type.in_types, in_types)):
+  if any(t1 != t2 for t1, t2 in zip(jaxpr_type.in_types, in_types)):
     raise TypeError
   return jaxpr_type.out_types
 abstract_eval_rules[cond_p] = cond_abstract_eval
@@ -2831,7 +2805,7 @@ print(out)
 # Transposition is a fairly straightforward application of `transpose_jaxpr`:
 
 def cond_transpose_rule(cts, pred, *invals, true_jaxpr, false_jaxpr):
-  undef_primals = tuple([type(x) is UndefPrimal for x in invals])
+  undef_primals = tuple(type(x) is UndefPrimal for x in invals)
   true_jaxpr, true_consts = transpose_jaxpr(true_jaxpr, undef_primals)
   false_jaxpr, false_consts = transpose_jaxpr(false_jaxpr, undef_primals)
   true_jaxpr, false_jaxpr = _join_jaxpr_consts(

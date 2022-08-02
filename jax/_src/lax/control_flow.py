@@ -513,7 +513,7 @@ def _while_partial_eval(trace: pe.JaxprTrace, *tracers: pe.Tracer, cond_nconsts:
   cond_jaxpr_known, _, cond_uk = pe.partial_eval_jaxpr(  # type: ignore
       cond_jaxpr, cond_consts_uk + carry_uk, instantiate=False)
 
-  if cond_uk[0] or all([not uk for uk in unknowns]) or all(unknowns):
+  if cond_uk[0] or not any(unknowns) or all(unknowns):
     # If conditional is unknown, or all inputs are known, or all are unknown,
     # just do the default processing.
     return trace.default_process_primitive(while_p, tracers, params)
@@ -539,12 +539,11 @@ def _while_partial_eval(trace: pe.JaxprTrace, *tracers: pe.Tracer, cond_nconsts:
 
   # Run the whole while_loop to get all the outputs, then merge with known ones
   out_all: Sequence[pe.Tracer] = trace.default_process_primitive(while_p, tracers, params)
-  out_tracers: Sequence[pe.Tracer] = [
-    out_unknown if uk
-    else pe.JaxprTracer(trace, pe.PartialVal.known(known), out_unknown.recipe)
-    for uk, out_unknown, known in zip(carry_uk, out_all, out_known)]
-
-  return out_tracers
+  return [
+      out_unknown if uk else pe.JaxprTracer(trace, pe.PartialVal.known(known),
+                                            out_unknown.recipe)
+      for uk, out_unknown, known in zip(carry_uk, out_all, out_known)
+  ]
 
 def _while_transpose_error(*_, **kwargs):
   raise ValueError("Reverse-mode differentiation does not work for "
@@ -598,7 +597,7 @@ def switch(index, branches: Sequence[Callable], operand):
 
   branches = tuple(branches)
 
-  if len(branches) == 0:
+  if not branches:
     raise ValueError("Empty branch sequence")
   elif len(branches) == 1:
     return branches[0](operand)
@@ -687,11 +686,7 @@ def _cond(pred, true_fun: Callable, false_fun: Callable, operand):
       raise TypeError(msg.format(pred_dtype))
 
   if config.jax_disable_jit and isinstance(core.get_aval(pred), ConcreteArray):
-    if pred:
-      return true_fun(operand)
-    else:
-      return false_fun(operand)
-
+    return true_fun(operand) if pred else false_fun(operand)
   ops, ops_tree = tree_flatten((operand,))
   ops_avals = tuple(_map(_abstractify, ops))
 
@@ -753,12 +748,18 @@ def _cond_translation_rule(c, axis_env, name_stack, avals, backend,
   del linear  # Unused.
 
   def make_computation(name, jaxpr, op_shape):
-    c = xb.make_computation_builder(name + '_comp')
+    c = xb.make_computation_builder(f'{name}_comp')
     op = xb.parameter(c, 0, op_shape)
     ops = [xops.GetTupleElement(op, i) for i in range(len(jaxpr.in_avals))]
-    outs = xla.jaxpr_subcomp(c, jaxpr.jaxpr, backend, axis_env,
-                             _map(partial(xb.constant, c), jaxpr.consts),
-                             extend_name_stack(name_stack, name + '_fun'), *ops)
+    outs = xla.jaxpr_subcomp(
+        c,
+        jaxpr.jaxpr,
+        backend,
+        axis_env,
+        _map(partial(xb.constant, c), jaxpr.consts),
+        extend_name_stack(name_stack, f'{name}_fun'),
+        *ops,
+    )
     return c.build(xops.Tuple(c, outs))
 
   op = xops.Tuple(c, args)
@@ -1234,7 +1235,7 @@ def scan(f: Callable[[Carry, X], Tuple[Carry, Y]],
 
   if length is not None:
     length = int(length)
-    if not all(length == l for l in lengths):
+    if any(length != l for l in lengths):
       msg = ("scan got `length` argument of {} which disagrees with "
              "leading axis sizes {}.")
       raise ValueError(msg.format(length, [x.shape[0] for x in xs_flat]))
@@ -1243,7 +1244,7 @@ def scan(f: Callable[[Carry, X], Tuple[Carry, Y]],
     if len(unique_lengths) > 1:
       msg = "scan got values with different leading axis sizes: {}."
       raise ValueError(msg.format(', '.join(str(x.shape[0]) for x in xs_flat)))
-    elif len(unique_lengths) == 0:
+    elif not unique_lengths:
       msg = "scan got no values to scan over and `length` not provided."
       raise ValueError(msg)
     else:
@@ -1343,10 +1344,9 @@ def _scan_impl_loop(*args, reverse, length, num_consts, num_carry, linear,
   ys_init = _map(partial(_empty_array, length), y_avals)
   if length == 0:
     return init + ys_init
-  else:
-    init_val = [lax._const(length, 0)] + init + ys_init
-    _, *outs = while_loop(cond_fun, body_fun, init_val)
-    return outs
+  init_val = [lax._const(length, 0)] + init + ys_init
+  _, *outs = while_loop(cond_fun, body_fun, init_val)
+  return outs
 
 def _scan_impl_block_unrolled(*args, reverse, length, num_consts, num_carry,
                               linear, block_length, f_impl, x_avals, y_avals):
@@ -1424,9 +1424,8 @@ def _scan_impl(*args, reverse, length, num_consts, num_carry, jaxpr, linear,
 def _stack(aval, vals):
   if aval is core.abstract_unit:
     return core.unit
-  else:
-    vals = [lax.expand_dims(x, (0,)) for x in vals]
-    return lax.concatenate(vals, 0)
+  vals = [lax.expand_dims(x, (0,)) for x in vals]
+  return lax.concatenate(vals, 0)
 
 def _concatenate(aval, x1, x2):
   if aval is core.abstract_unit:
@@ -1437,10 +1436,9 @@ def _concatenate(aval, x1, x2):
 def _split_leading_dim(i, aval, x):
   if aval is core.abstract_unit:
     return (core.unit, core.unit)
-  else:
-    assert x.ndim >= 1
-    return (lax.slice_in_dim(x, 0, i),
-            lax.slice_in_dim(x, i, x.shape[0]))
+  assert x.ndim >= 1
+  return (lax.slice_in_dim(x, 0, i),
+          lax.slice_in_dim(x, i, x.shape[0]))
 
 def _dynamic_index_array(i, aval, x):
   if aval is core.abstract_unit:
@@ -1469,19 +1467,17 @@ def _update_array(i, aval, xs, x):
 def _partition_leading(sz0, sz1, aval, x):
   if aval is core.abstract_unit:
     return core.unit
-  else:
-    assert x.ndim >= 1
-    assert x.shape[0] == sz0 * sz1
-    return lax.reshape(x, (sz0, sz1, *x.shape[1:]))
+  assert x.ndim >= 1
+  assert x.shape[0] == sz0 * sz1
+  return lax.reshape(x, (sz0, sz1, *x.shape[1:]))
 
 def _combine_leading(sz0, sz1, aval, x):
   if aval is core.abstract_unit:
     return core.unit
-  else:
-    assert x.ndim >= 2
-    assert x.shape[0] == sz0
-    assert x.shape[1] == sz1
-    return lax.collapse(x, 0, 2)
+  assert x.ndim >= 2
+  assert x.shape[0] == sz0
+  assert x.shape[1] == sz1
+  return lax.collapse(x, 0, 2)
 
 def _prepend_dim_to_aval(sz, aval):
   if aval is core.abstract_unit:

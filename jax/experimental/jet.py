@@ -126,10 +126,9 @@ class JetTrace(core.Trace):
                  for x, series in zip(primals_in, series_in)]
     rule = jet_rules[primitive]
     primal_out, terms_out = rule(primals_in, series_in, **params)
-    if not primitive.multiple_results:
-      return JetTracer(self, primal_out, terms_out)
-    else:
-      return [JetTracer(self, p, ts) for p, ts in zip(primal_out, terms_out)]
+    return ([JetTracer(self, p, ts) for p, ts in zip(primal_out, terms_out)
+             ] if primitive.multiple_results else JetTracer(
+                 self, primal_out, terms_out))
 
   def process_call(self, call_primitive, f, tracers, params):
     primals_in, series_in = unzip2((t.primal, t.terms) for t in tracers)
@@ -364,7 +363,7 @@ def _exp_taylor(primals_in, series_in):
   u = [x] + series
   v = [lax.exp(x)] + [None] * len(series)
   for k in range(1,len(v)):
-    v[k] = fact(k-1) * sum([_scale(k, j)* v[k-j] * u[j] for j in range(1, k+1)])
+    v[k] = fact(k-1) * sum(_scale(k, j)* v[k-j] * u[j] for j in range(1, k+1))
   primal_out, *series_out = v
   return primal_out, series_out
 jet_rules[lax.exp_p] = _exp_taylor
@@ -377,7 +376,7 @@ def _pow_taylor(primals_in, series_in):
   u = [x] + series
   v = [u_ ** r_] + [None] * len(series)
   for k in range(1, len(v)):
-    v[k] = fact(k-1) * sum([_scale(k, j)* v[k-j] * u[j] for j in range(1, k+1)])
+    v[k] = fact(k-1) * sum(_scale(k, j)* v[k-j] * u[j] for j in range(1, k+1))
   primal_out, *series_out = v
 
   return primal_out, series_out
@@ -411,8 +410,9 @@ def _expit_taylor(primals_in, series_in):
   v = [jax.scipy.special.expit(x)] + [None] * len(series)
   e = [v[0] * (1 - v[0])] + [None] * len(series)  # terms for sigmoid' = sigmoid * (1 - sigmoid)
   for k in range(1, len(v)):
-    v[k] = fact(k-1) * sum([_scale(k, j) * e[k-j] * u[j] for j in range(1, k+1)])
-    e[k] = (1 - v[0]) * v[k] - fact(k) * sum([_scale2(k, j)* v[j] * v[k-j] for j in range(1, k+1)])
+    v[k] = fact(k-1) * sum(_scale(k, j) * e[k-j] * u[j] for j in range(1, k+1))
+    e[k] = (1 - v[0]) * v[k] - fact(k) * sum(
+        _scale2(k, j) * v[j] * v[k - j] for j in range(1, k + 1))
 
   primal_out, *series_out = v
   return primal_out, series_out
@@ -433,7 +433,7 @@ def _log_taylor(primals_in, series_in):
   u = [x] + series
   v = [lax.log(x)] + [None] * len(series)
   for k in range(1, len(v)):
-    conv = sum([_scale(k, j) * v[j] * u[k-j] for j in range(1, k)])
+    conv = sum(_scale(k, j) * v[j] * u[k-j] for j in range(1, k))
     v[k] = (u[k] - fact(k - 1) * conv) / u[0]
   primal_out, *series_out = v
   return primal_out, series_out
@@ -461,8 +461,9 @@ def _div_taylor_rule(primals_in, series_in):
   w = [y] + y_terms
   v = [None] * len(u)
   def scale(k, j): return 1. / (fact(k - j) * fact(j))
-  for k in range(0, len(v)):
-    conv = sum([scale(k, j) * v[j] * w[k-j] for j in range(0, k)])
+
+  for k in range(len(v)):
+    conv = sum(scale(k, j) * v[j] * w[k-j] for j in range(k))
     v[k] = (u[k] - fact(k) * conv) / w[0]
   primal_out, *series_out = v
   return primal_out, series_out
@@ -496,8 +497,9 @@ def _bilinear_taylor_rule(prim, primals_in, series_in, **params):
   v = [None] * len(u)
   op = partial(prim.bind, **params)
   def scale(k, j): return 1. / (fact(k - j) * fact(j))
-  for k in range(0, len(v)):
-    v[k] = fact(k) * sum([scale(k, j) * op(u[j], w[k-j]) for j in range(0, k+1)])
+
+  for k in range(len(v)):
+    v[k] = fact(k) * sum(scale(k, j) * op(u[j], w[k-j]) for j in range(k+1))
   primal_out, *series_out = v
   return primal_out, series_out
 jet_rules[lax.dot_general_p] = partial(_bilinear_taylor_rule, lax.dot_general_p)

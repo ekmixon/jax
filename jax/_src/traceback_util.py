@@ -70,7 +70,7 @@ def filter_traceback(tb):
   for f, lineno in reversed(frames):
     if include_frame(f):
       out = make_traceback(out, f, f.f_lasti, lineno)  # pytype: disable=wrong-arg-count
-  if out is None and len(frames) > 0:
+  if out is None and frames:
     f, lineno = frames[-1]
     out = make_traceback(out, f, f.f_lasti, lineno)
   return out
@@ -88,7 +88,7 @@ def add_call_stack_frames(tb):
   out = tb
 
   reached_module_level = False
-  for f, lineno in traceback.walk_stack(tb.tb_frame):
+  for f, lineno in traceback.walk_stack(out.tb_frame):
     if ignore_known_hidden_frame(f):
       continue
     if reached_module_level and f.f_code.co_name != '<module>':

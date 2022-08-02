@@ -90,8 +90,7 @@ def _scale_and_translate(x, output_shape, spatial_dims, scale, translation,
     n = output_shape[d]
     w = compute_weight_mat(m, n, scale[i], translation[i],
                            kernel, antialias).astype(x.dtype)
-    contractions.append(w)
-    contractions.append([d, len(output_shape) + i])
+    contractions.extend((w, [d, len(output_shape) + i]))
     out_indices[d] = len(output_shape) + i
   contractions.append(out_indices)
   return jnp.einsum(x, in_indices, *contractions, precision=precision)
@@ -112,13 +111,13 @@ class ResizeMethod(enum.Enum):
   def from_string(s: str):
     if s == 'nearest':
       return ResizeMethod.NEAREST
-    if s in ['linear', 'bilinear', 'trilinear', 'triangle']:
+    if s in {'linear', 'bilinear', 'trilinear', 'triangle'}:
       return ResizeMethod.LINEAR
     elif s == 'lanczos3':
       return ResizeMethod.LANCZOS3
     elif s == 'lanczos5':
       return ResizeMethod.LANCZOS5
-    elif s in ['cubic', 'bicubic', 'tricubic']:
+    elif s in {'cubic', 'bicubic', 'tricubic'}:
       return ResizeMethod.CUBIC
     else:
       raise ValueError(f'Unknown resize method "{s}"')

@@ -68,10 +68,7 @@ def canonicalize_dtype(dtype):
   except TypeError as e:
     raise TypeError(f'dtype {dtype!r} not understood') from e
 
-  if config.x64_enabled:
-    return dtype
-  else:
-    return _dtype_to_32bit_dtype.get(dtype, dtype)
+  return dtype if config.x64_enabled else _dtype_to_32bit_dtype.get(dtype, dtype)
 
 
 # Default dtypes corresponding to Python scalars.
@@ -95,7 +92,7 @@ def scalar_type_of(x):
   elif np.issubdtype(typ, np.complexfloating):
     return complex
   else:
-    raise TypeError("Invalid scalar value {}".format(x))
+    raise TypeError(f"Invalid scalar value {x}")
 
 
 def _scalar_type_to_dtype(typ: type, value: Any = None):
@@ -122,9 +119,9 @@ def _scalar_type_to_dtype(typ: type, value: Any = None):
   OverflowError: Python int 9223372036854775808 too large to convert to int32
   """
   dtype = canonicalize_dtype(python_scalar_dtypes[typ])
-  if typ is int and value is not None:
-    if value < np.iinfo(dtype).min or value > np.iinfo(dtype).max:
-      raise OverflowError(f"Python int {value} too large to convert to {dtype}")
+  if (typ is int and value is not None
+      and (value < np.iinfo(dtype).min or value > np.iinfo(dtype).max)):
+    raise OverflowError(f"Python int {value} too large to convert to {dtype}")
   return dtype
 
 
@@ -364,6 +361,6 @@ def _lattice_result_type(*args):
 
 def result_type(*args):
   """Convenience function to apply JAX argument dtype promotion."""
-  if len(args) == 0:
+  if not args:
     raise ValueError("at least one array or dtype is required")
   return canonicalize_dtype(_lattice_result_type(*args)[0])

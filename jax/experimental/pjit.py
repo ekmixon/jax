@@ -352,8 +352,7 @@ def _check_unique_resources(axis_resources, arg_name):
     resource_counts = Counter(it.chain.from_iterable(arg_axis_resources))
     if not resource_counts: continue
     if resource_counts.most_common(1)[0][1] > 1:
-      multiple_uses = [r for r, c in resource_counts.items() if c > 1]
-      if multiple_uses:
+      if multiple_uses := [r for r, c in resource_counts.items() if c > 1]:
         raise ValueError(f"A single {arg_name} specification can map every mesh axis "
                          f"to at most one positional dimension, but {arg_axis_resources.user_spec} "
                          f"has duplicate entries for {maps.show_axes(multiple_uses)}")
@@ -523,8 +522,7 @@ def _check_resources_against_named_axes(what, aval, pos_axis_resources, named_ax
   pjit_resources = set(it.chain.from_iterable(pos_axis_resources))
   aval_resources = set(it.chain.from_iterable(
     named_axis_resources[a] for a in aval.named_shape))
-  overlap = pjit_resources & aval_resources
-  if overlap:
+  if overlap := pjit_resources & aval_resources:
     raise JAXTypeError(
         f"{what} has an axis resources specification of "
         f"{pos_axis_resources.unsynced_user_spec(SpecSync.DIM_PERMUTE)} "
